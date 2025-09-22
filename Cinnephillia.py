@@ -99,8 +99,10 @@ def main(movie_root):
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
     if not os.path.isdir(rip_path):
-        logging.error(f"rip folder not found: {rip_path}")
-        return
+        error_msg = f"ERROR: rip folder not found: {rip_path}"
+        logging.error(error_msg)
+        print(error_msg, file=sys.stderr)  # Print error to the console
+        sys.exit(1)  # Exit with code 1 (generic error)
     movies = [f for f in os.listdir(rip_path) if f.lower().endswith(".mkv")]
 
     full_paths = [os.path.join(rip_path, f) for f in movies]

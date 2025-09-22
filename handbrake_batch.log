@@ -1746,3 +1746,7 @@ HandBrake has exited.
 2025-09-22 11:06:34 - INFO - Rip path: /mnt/bigbrother/Movies/Indiana Jones and The Last Crusade (1989)/rip
 2025-09-22 11:06:34 - INFO - MKV files found: ["Indy's Women - AFI Tribute-Behind The Scenes.mkv", 'Indiana Jones and the Last Crusade (1989).mkv', 'The Light and Magic of Indiana Jones-Interviews.mkv', 'Making of Temple of Doom-Behind The Scenes.mkv', 'Adventures in Post Production - Crystal Skull.mkv', 'Creepie Crawlies-Featurettes.mkv']
 2025-09-22 11:06:34 - INFO - HandBrakeCLI CMD (main feature): HandBrakeCLI -i /mnt/bigbrother/Movies/Indiana Jones and The Last Crusade (1989)/rip/Indiana Jones and the Last Crusade (1989).mkv -o /mnt/bigbrother/Movies/Indiana Jones and The Last Crusade (1989)/Plex Movie Files/Indiana Jones and The Last Crusade (1989).mkv --preset H.265 MKV 1080p30 --all-audio --all-subtitles -Ecopy:ac3,copy:dts,copy:truehd,copy:eac3,copy:aac,copy:mp3,copy:flac,copy:opus,copy:vorbis,copy:pcm -f mkv
+2025-09-22 15:09:03 - ERROR - rip folder not found: /mnt/bigbrother/Movies/Doctor\ Strange\ \(2017\)/rip
+2025-09-22 15:09:12 - ERROR - rip folder not found: /mnt/bigbrother/Movies/Doctor\ Strange\ \(2017\)/rip
+2025-09-22 15:09:19 - ERROR - rip folder not found: /mnt/bigbrother/Movies/Doctor\ Strange\ \(2017\)/rip
+2025-09-22 15:11:31 - ERROR - ERROR: rip folder not found: /mnt/bigbrother/Movies/Doctor\ Strange\ \(2017\)/rip
