@@ -76,7 +76,7 @@ def process_main_feature(src, out_dir, title, year):
         logging.info("Main feature processed successfully.")
 
 
-ddef process_extra(src, out_dir, base, suffix, preset):
+def process_extra(src, out_dir, base, suffix, preset):
     output_file = os.path.join(out_dir, f"{base}.mkv")  # Suffix removed
     cmd = [
         HANDBRAKE_CLI, "-i", src, "-o", output_file,
