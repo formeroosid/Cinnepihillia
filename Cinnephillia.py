@@ -6,6 +6,7 @@ import getpass
 import pwd
 import grp
 import json
+import argparse
 
 HANDBRAKE_CLI = "HandBrakeCLI"
 
@@ -106,8 +107,7 @@ def process_extra(src, out_dir, base, preset):
     output_file = os.path.join(out_dir, f"{base}.mkv")
     cmd = [
         HANDBRAKE_CLI,
-        "--preset-import-file", preset["file"],
-        "--preset", preset["name"],
+        "--preset", "Very Fast 720p30",
         "-i", src,
         "-o", output_file,
         "-a", "1", "--all-subtitles", "-f", "mkv"
@@ -161,6 +161,15 @@ def main(movie_root):
             process_extra(extra, out_dir, extra_base, preset)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["feature", "extras", "both"], default="both",
+                        help="Process only main feature, only extras, or both")
+    args = parser.parse_args()
+
+    if args.mode in ("feature", "both"):
+        process_main_feature(...)
+    if args.mode in ("extras", "both"):
+        process_extras(...)
     if len(sys.argv) != 2:
         print("Usage: python handbrake_batch.py /path/to/<Movie Title (YYYY)>")
         sys.exit(1)
