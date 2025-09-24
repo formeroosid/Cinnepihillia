@@ -22,7 +22,7 @@ CUSTOM_PRESETS = {
     "4k": {
         # Assumes 'uhd_preset.json' is located in the same directory as the script
         "file": os.path.join(SCRIPT_DIR, "4K UHD H.265 MKV 2160p60 4K.json"),
-        "name": "4K UHD H.265 MKV 2160p60 4K    "
+        "name": "4K UHD H.265 MKV 2160p60 4K"
     }
 }
 
@@ -107,71 +107,78 @@ def process_extra(src, out_dir, base, preset):
     output_file = os.path.join(out_dir, f"{base}.mkv")
     cmd = [
         HANDBRAKE_CLI,
-        "--preset", "Very Fast 720p30",
+        "--preset", "H.265 MKV 720p30",
         "-i", src,
         "-o", output_file,
-        "-a", "1", "--all-subtitles", "-f", "mkv"
+        "-a", "1", "--subtitle=1", "-f", "mkv"
     ]
     logging.info(f"HandBrakeCLI CMD (extras): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
-    logging.info(f"{output_file} | {out_dir} | {preset['name']}")
+    extra_preset = "H.265 MKV 720p30"
+    logging.info(f"{output_file} | {out_dir} | {extra_preset}")
+
     if result.returncode != 0:
         logging.error(f"Extra failed: {result.stderr}")
     else:
         logging.info("Extra processed successfully.")
 
-def main(movie_root):
+
+def main(movie_root, mode):
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
     preset = CUSTOM_PRESETS["bluray"]  # Default preset assignment here
+
     if not os.path.isdir(rip_path):
         msg = f"ERROR: rip folder not found: {rip_path}"
         logging.error(msg)
         print(msg, file=sys.stderr)
         sys.exit(1)
+
     movies = [f for f in os.listdir(rip_path) if f.lower().endswith(".mkv")]
     full_paths = [os.path.join(rip_path, f) for f in movies]
     logging.info(f"Rip path: {rip_path}")
     logging.info(f"MKV files found: {movies}")
 
-    # Process main feature
-    if full_paths:
+    if not full_paths:
+        logging.warning(f"No MKV files in: {rip_path}")
+        return
+
+    # Main feature and extras selection
+    main_feature = None
+    extras = []
+    if mode in ("feature", "both") and full_paths:
         main_feature = identify_main_feature(full_paths)
         extras = [f for f in full_paths if f != main_feature]
+
         width, height = detect_resolution(main_feature)
         preset = select_preset(width, height)
         process_main_feature(main_feature, plex_root, title, year, preset)
     else:
-        logging.warning(f"No MKV files in: {rip_path}")
-        extras = []
+        # If only "extras" mode, extras is full_paths
+        if mode == "extras":
+            extras = full_paths
 
     # Process extras
-    for extra in extras:
-        extra_base = os.path.splitext(os.path.basename(extra))[0]
-        assigned = False
-        for folder in EXTRA_FOLDERS:
-            if folder.lower().replace(" ", "_") in extra_base.lower():
-                out_dir = os.path.join(plex_root, folder)
+    if mode in ("extras", "both"):
+        for extra in extras:
+            extra_base = os.path.splitext(os.path.basename(extra))[0]
+            assigned = False
+            for folder in EXTRA_FOLDERS:
+                if folder.lower().replace(" ", "_") in extra_base.lower():
+                    out_dir = os.path.join(plex_root, folder)
+                    process_extra(extra, out_dir, extra_base, preset)
+                    assigned = True
+                    break
+            if not assigned:
+                out_dir = os.path.join(plex_root, "Other")
                 process_extra(extra, out_dir, extra_base, preset)
-                assigned = True
-                break
-        if not assigned:
-            out_dir = os.path.join(plex_root, "Other")
-            process_extra(extra, out_dir, extra_base, preset)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Handbrake batch script")
+    parser.add_argument("path", help="Path to Movie Title (YYYY)")
     parser.add_argument("--mode", choices=["feature", "extras", "both"], default="both",
-                        help="Process only main feature, only extras, or both")
+                        help="Process main feature, extras, or both.")
     args = parser.parse_args()
 
-    if args.mode in ("feature", "both"):
-        process_main_feature(...)
-    if args.mode in ("extras", "both"):
-        process_extras(...)
-    if len(sys.argv) != 2:
-        print("Usage: python handbrake_batch.py /path/to/<Movie Title (YYYY)>")
-        sys.exit(1)
-    movie_root_path = sys.argv[1]
-    main(movie_root_path)
+    main(args.path, args.mode)
