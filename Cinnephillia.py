@@ -5,32 +5,31 @@ import logging
 import getpass
 import pwd
 import grp
+import json
 
-# from datetime import datetime
+HANDBRAKE_CLI = "HandBrakeCLI"
 
-# --- BEGIN CONFIG ---
+# Path/names must match your HandBrake GUI exported custom presets.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-HANDBRAKE_CLI = "HandBrakeCLI"  # or full path if not in PATH
-
-PRESETS = {
-    "main_feature": "H.265 MKV 1080p30",  # Replace with the actual HandBrake preset name or JSON file path
-    "extras": "H.265 MKV 720p30"              # Replace with the actual HandBrake preset name or JSON file path
+CUSTOM_PRESETS = {
+    "bluray": {
+        # Assumes 'bluray_preset.json' is located in the same directory as the script
+        "file": os.path.join(SCRIPT_DIR, "Blu-Ray H.265 MKV 1080p30.json"),
+        "name": "Blu-Ray H.265 MKV 1080p30"
+    },
+    "4k": {
+        # Assumes 'uhd_preset.json' is located in the same directory as the script
+        "file": os.path.join(SCRIPT_DIR, "4K UHD H.265 MKV 2160p60 4K.json"),
+        "name": "4K UHD H.265 MKV 2160p60 4K    "
+    }
 }
+
 EXTRA_FOLDERS = [
-    "Behind The Scenes",
-    "Deleted Scenes",
-    "Featurettes",
-    "Interviews",
-    "Other",
-    "Scenes",
-    "Shorts",
-    "Trailers"
+    "Behind The Scenes", "Deleted Scenes", "Featurettes",
+    "Interviews", "Other", "Scenes", "Shorts", "Trailers"
 ]
 
-# --- END CONFIG ---
-
-
-# Set up logger
 logging.basicConfig(
     filename="handbrake_batch.log",
     level=logging.INFO,
@@ -38,9 +37,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+def ensure_dir_permissions(out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    user = getpass.getuser()
+    uid = pwd.getpwnam(user).pw_uid
+    gid = grp.getgrnam(user).gr_gid
+    os.chown(out_dir, uid, gid)
+    os.chmod(out_dir, 0o775)
 
 def get_movie_info(root_path):
-    """Extract movie title and year from folder name."""
     base = os.path.basename(root_path.rstrip(os.sep))
     if " (" in base and base.endswith(")"):
         title, year = base.rsplit(" (", 1)
@@ -48,64 +53,84 @@ def get_movie_info(root_path):
         return title, year
     return base, ""
 
-
 def identify_main_feature(files):
-    """Identify the main feature file by largest size."""
-    if not files:
-        return None
-    return max(files, key=lambda x: os.path.getsize(x))
+    return max(files, key=lambda x: os.path.getsize(x)) if files else None
 
+def detect_resolution(mkv_path):
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", mkv_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        probe = json.loads(result.stdout)
+        stream = probe["streams"][0]
+        return stream["width"], stream["height"]
+    except Exception as e:
+        logging.error(f"ffprobe failed for {mkv_path}: {e}")
+        return None, None
 
-def process_main_feature(src, out_dir, title, year):
+def select_preset(width, height):
+    if width is None or height is None:
+        logging.info("Could not detect resolution, using BluRay profile.")
+        return CUSTOM_PRESETS["bluray"]
+    if width >= 3840 or height >= 2160:
+        logging.info(f"Main feature detected as 4K ({width}x{height}).")
+        return CUSTOM_PRESETS["4k"]
+    else:
+        logging.info(f"Main feature detected as BluRay ({width}x{height}).")
+        return CUSTOM_PRESETS["bluray"]
+
+def process_main_feature(src, out_dir, title, year, preset):
+    ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
-    preset = PRESETS['main_feature']
     cmd = [
-        HANDBRAKE_CLI, "-i", src, "-o", output_file,
-        "--preset", preset,
+        HANDBRAKE_CLI,
+        "--preset-import-file", preset["file"],
+        "--preset", preset["name"],
+        "-i", src,
+        "-o", output_file,
         "--all-audio", "--all-subtitles",
-        "-E", "copy:ac3,copy:dts,copy:truehd,copy:eac3,copy:aac,copy:mp3,copy:flac,copy:opus,copy:vorbis,copy:pcm",
         "-f", "mkv"
     ]
-
     logging.info(f"HandBrakeCLI CMD (main feature): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
-    logging.info(f"{output_file} | {out_dir} | {preset} | Audio Passthrough")
+    logging.info(f"{output_file} | {out_dir} | {preset['name']}")
     if result.returncode != 0:
         logging.error(f"Main feature failed: {result.stderr}")
     else:
         logging.info("Main feature processed successfully.")
 
-
-def process_extra(src, out_dir, base, suffix, preset):
-    output_file = os.path.join(out_dir, f"{base}.mkv")  # Suffix removed
+def process_extra(src, out_dir, base, preset):
+    ensure_dir_permissions(out_dir)
+    output_file = os.path.join(out_dir, f"{base}.mkv")
     cmd = [
-        HANDBRAKE_CLI, "-i", src, "-o", output_file,
-        "--preset", preset,
-        "-a", "1",         # Only first audio track
-        "--all-subtitles",
-        "-f", "mkv"
+        HANDBRAKE_CLI,
+        "--preset-import-file", preset["file"],
+        "--preset", preset["name"],
+        "-i", src,
+        "-o", output_file,
+        "-a", "1", "--all-subtitles", "-f", "mkv"
     ]
     logging.info(f"HandBrakeCLI CMD (extras): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
-    logging.info(f"{output_file} | {out_dir} | {preset}")
+    logging.info(f"{output_file} | {out_dir} | {preset['name']}")
     if result.returncode != 0:
         logging.error(f"Extra failed: {result.stderr}")
     else:
         logging.info("Extra processed successfully.")
 
-
-
 def main(movie_root):
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
+    preset = CUSTOM_PRESETS["bluray"]  # Default preset assignment here
     if not os.path.isdir(rip_path):
-        error_msg = f"ERROR: rip folder not found: {rip_path}"
-        logging.error(error_msg)
-        print(error_msg, file=sys.stderr)  # Print error to the console
-        sys.exit(1)  # Exit with code 1 (generic error)
+        msg = f"ERROR: rip folder not found: {rip_path}"
+        logging.error(msg)
+        print(msg, file=sys.stderr)
+        sys.exit(1)
     movies = [f for f in os.listdir(rip_path) if f.lower().endswith(".mkv")]
-
     full_paths = [os.path.join(rip_path, f) for f in movies]
     logging.info(f"Rip path: {rip_path}")
     logging.info(f"MKV files found: {movies}")
@@ -114,45 +139,26 @@ def main(movie_root):
     if full_paths:
         main_feature = identify_main_feature(full_paths)
         extras = [f for f in full_paths if f != main_feature]
-        process_main_feature(main_feature, plex_root, title, year)
-        os.makedirs(plex_root, exist_ok=True)
-        user = getpass.getuser()
-        uid = pwd.getpwnam(user).pw_uid
-        gid = grp.getgrnam(user).gr_gid
-        os.chown(plex_root, uid, gid)
-        os.chmod(plex_root, 0o775)
+        width, height = detect_resolution(main_feature)
+        preset = select_preset(width, height)
+        process_main_feature(main_feature, plex_root, title, year, preset)
     else:
         logging.warning(f"No MKV files in: {rip_path}")
         extras = []
 
-    # Process extras in each Extras folder
+    # Process extras
     for extra in extras:
         extra_base = os.path.splitext(os.path.basename(extra))[0]
         assigned = False
-        # Optionally, assign extras to folders based on name or some user convention
         for folder in EXTRA_FOLDERS:
             if folder.lower().replace(" ", "_") in extra_base.lower():
                 out_dir = os.path.join(plex_root, folder)
-                os.makedirs(out_dir, exist_ok=True)
-                user = getpass.getuser()  # Should be 'jgordon'
-                uid = pwd.getpwnam(user).pw_uid
-                gid = grp.getgrnam(user).gr_gid
-                os.chown(out_dir, uid, gid)
-                os.chmod(out_dir, 0o775)
-                process_extra(extra, out_dir, extra_base, folder.replace(" ", ""), PRESETS['extras'])
+                process_extra(extra, out_dir, extra_base, preset)
                 assigned = True
                 break
         if not assigned:
-            # Default to "Other"
             out_dir = os.path.join(plex_root, "Other")
-            os.makedirs(out_dir, exist_ok=True)  # <-- ensure created
-            user = getpass.getuser()
-            uid = pwd.getpwnam(user).pw_uid
-            gid = grp.getgrnam(user).gr_gid
-            os.chown(out_dir, uid, gid)
-            os.chmod(out_dir, 0o775)
-            process_extra(extra, out_dir, extra_base, "Other", PRESETS['extras'])
-
+            process_extra(extra, out_dir, extra_base, preset)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
