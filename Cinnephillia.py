@@ -7,6 +7,7 @@ import pwd
 import grp
 import json
 import argparse
+import re
 
 HANDBRAKE_CLI = "HandBrakeCLI"
 
@@ -28,7 +29,7 @@ CUSTOM_PRESETS = {
 
 EXTRA_FOLDERS = [
     "Behind The Scenes", "Deleted Scenes", "Featurettes",
-    "Interviews", "Other", "Scenes", "Shorts", "Trailers"
+    "Interviews", "Other", "Shorts", "Trailers"
 ]
 
 logging.basicConfig(
@@ -160,19 +161,24 @@ def main(movie_root, mode):
             extras = full_paths
 
     # Process extras
-    if mode in ("extras", "both"):
-        for extra in extras:
-            extra_base = os.path.splitext(os.path.basename(extra))[0]
-            assigned = False
-            for folder in EXTRA_FOLDERS:
-                if folder.lower().replace(" ", "_") in extra_base.lower():
-                    out_dir = os.path.join(plex_root, folder)
-                    process_extra(extra, out_dir, extra_base, preset)
-                    assigned = True
-                    break
-            if not assigned:
-                out_dir = os.path.join(plex_root, "Other")
-                process_extra(extra, out_dir, extra_base, preset)
+    for extra in extras:
+        extra_base = os.path.splitext(os.path.basename(extra))[0]
+        assigned = False
+        for folder in sorted(EXTRA_FOLDERS, key=len, reverse=True):
+            # Flexible pattern: separator, folder (underscored), end of string, ignore case
+            folder_token = folder.replace(" ", "[ _-]").lower()
+            pattern = re.compile(rf"(.+)[ _-]{folder_token}$", re.IGNORECASE)
+            match = pattern.match(extra_base)
+            if match:
+                trimmed_name = match.group(1).strip(" _-")
+                out_dir = os.path.join(plex_root, folder)
+                process_extra(extra, out_dir, trimmed_name, preset)
+                assigned = True
+                break
+        if not assigned:
+            out_dir = os.path.join(plex_root, "Other")
+            process_extra(extra, out_dir, extra_base, preset)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Handbrake batch script")
