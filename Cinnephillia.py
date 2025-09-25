@@ -103,25 +103,25 @@ def process_main_feature(src, out_dir, title, year, preset):
     else:
         logging.info("Main feature processed successfully.")
 
-def process_extra(src, out_dir, base, preset):
+def process_extra(src, out_dir, base, extra_preset_name):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{base}.mkv")
     cmd = [
         HANDBRAKE_CLI,
-        "--preset", "H.265 MKV 720p30",
+        "--preset", extra_preset_name,
         "-i", src,
         "-o", output_file,
         "-a", "1", "--subtitle=1", "-f", "mkv"
     ]
     logging.info(f"HandBrakeCLI CMD (extras): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
-    extra_preset = "H.265 MKV 720p30"
-    logging.info(f"{output_file} | {out_dir} | {extra_preset}")
+    logging.info(f"{output_file} | {out_dir} | {extra_preset_name}")
 
     if result.returncode != 0:
         logging.error(f"Extra failed: {result.stderr}")
     else:
         logging.info("Extra processed successfully.")
+
 
 
 def main(movie_root, mode):
@@ -148,18 +148,16 @@ def main(movie_root, mode):
     # Main feature and extras selection
     main_feature = None
     extras = []
-    if mode in ("feature", "both") and full_paths:
+    if mode in ("feature", "both"):
         main_feature = identify_main_feature(full_paths)
         extras = [f for f in full_paths if f != main_feature]
+        # main feature processing...
+    elif mode == "extras":
+        main_feature = identify_main_feature(full_paths)
+        # Exclude the main feature from extras
+        extras = [f for f in full_paths if f != main_feature]
 
-        width, height = detect_resolution(main_feature)
-        preset = select_preset(width, height)
-        process_main_feature(main_feature, plex_root, title, year, preset)
-    else:
-        # If only "extras" mode, extras is full_paths
-        if mode == "extras":
-            extras = full_paths
-
+    EXTRAS_PRESET = "H.265 MKV 720p30"
     # Process extras
     for extra in extras:
         extra_base = os.path.splitext(os.path.basename(extra))[0]
@@ -172,12 +170,13 @@ def main(movie_root, mode):
             if match:
                 trimmed_name = match.group(1).strip(" _-")
                 out_dir = os.path.join(plex_root, folder)
-                process_extra(extra, out_dir, trimmed_name, preset)
+                process_extra(extra, out_dir, trimmed_name, EXTRAS_PRESET)
                 assigned = True
                 break
+
         if not assigned:
             out_dir = os.path.join(plex_root, "Other")
-            process_extra(extra, out_dir, extra_base, preset)
+            process_extra(extra, out_dir, extra_base, EXTRAS_PRESET)
 
 
 if __name__ == "__main__":
