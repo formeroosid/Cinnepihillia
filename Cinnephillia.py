@@ -145,39 +145,32 @@ def main(movie_root, mode):
         logging.warning(f"No MKV files in: {rip_path}")
         return
 
-    # Main feature and extras selection
-    main_feature = None
-    extras = []
-    if mode in ("feature", "both"):
-        main_feature = identify_main_feature(full_paths)
-        extras = [f for f in full_paths if f != main_feature]
-        # main feature processing...
-    elif mode == "extras":
-        main_feature = identify_main_feature(full_paths)
-        # Exclude the main feature from extras
-        extras = [f for f in full_paths if f != main_feature]
+    main_feature = identify_main_feature(full_paths)
+    extras = [f for f in full_paths if f != main_feature]
+
+    if mode in ("feature", "both") and main_feature:
+        width, height = detect_resolution(main_feature)
+        preset = select_preset(width, height)
+        process_main_feature(main_feature, plex_root, title, year, preset)
 
     EXTRAS_PRESET = "H.265 MKV 720p30"
-    # Process extras
-    for extra in extras:
-        extra_base = os.path.splitext(os.path.basename(extra))[0]
-        assigned = False
-        for folder in sorted(EXTRA_FOLDERS, key=len, reverse=True):
-            # Flexible pattern: separator, folder (underscored), end of string, ignore case
-            folder_token = folder.replace(" ", "[ _-]").lower()
-            pattern = re.compile(rf"(.+)[ _-]{folder_token}$", re.IGNORECASE)
-            match = pattern.match(extra_base)
-            if match:
-                trimmed_name = match.group(1).strip(" _-")
-                out_dir = os.path.join(plex_root, folder)
-                process_extra(extra, out_dir, trimmed_name, EXTRAS_PRESET)
-                assigned = True
-                break
-
-        if not assigned:
-            out_dir = os.path.join(plex_root, "Other")
-            process_extra(extra, out_dir, extra_base, EXTRAS_PRESET)
-
+    if mode in ("extras", "both"):
+        for extra in extras:
+            extra_base = os.path.splitext(os.path.basename(extra))[0]
+            assigned = False
+            for folder in sorted(EXTRA_FOLDERS, key=len, reverse=True):
+                folder_token = folder.replace(" ", "[ _-]").lower()
+                pattern = re.compile(rf"(.+)[ _-]{folder_token}$", re.IGNORECASE)
+                match = pattern.match(extra_base)
+                if match:
+                    trimmed_name = match.group(1).strip(" _-")
+                    out_dir = os.path.join(plex_root, folder)
+                    process_extra(extra, out_dir, trimmed_name, EXTRAS_PRESET)
+                    assigned = True
+                    break
+            if not assigned:
+                out_dir = os.path.join(plex_root, "Other")
+                process_extra(extra, out_dir, extra_base, EXTRAS_PRESET)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Handbrake batch script")
