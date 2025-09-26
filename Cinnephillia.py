@@ -128,7 +128,7 @@ def main(movie_root, mode):
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
-    preset = CUSTOM_PRESETS["bluray"]  # Default preset assignment here
+#   preset = CUSTOM_PRESETS["bluray"]
 
     if not os.path.isdir(rip_path):
         msg = f"ERROR: rip folder not found: {rip_path}"
