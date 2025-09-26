@@ -17,12 +17,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CUSTOM_PRESETS = {
     "bluray": {
         # Assumes 'bluray_preset.json' is located in the same directory as the script
-        "file": os.path.join(SCRIPT_DIR, "Home Theater HQ - x265 10bit CRF18.json"),
+        "file": os.path.join(SCRIPT_DIR, "Home_Theater_HQ_-_x265_10bit_CRF18.json"),
         "name": "Home Theater HQ - x265 10bit CRF18"
     },
     "4k": {
         # Assumes 'uhd_preset.json' is located in the same directory as the script
-        "file": os.path.join(SCRIPT_DIR, "Home Theatre 4K - x265 10bit CRF20.json"),
+        "file": os.path.join(SCRIPT_DIR, "Home_Theatre_4K_-_x265_10bit_CRF20.json"),
         "name": "Home Theatre 4K - x265 10bit CRF20"
     }
 }
