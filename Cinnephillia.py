@@ -93,6 +93,7 @@ def process_main_feature(src, out_dir, title, year, preset):
         "-i", src,
         "-o", output_file,
         "--all-subtitles",
+        "--all-audio",
         "-f", "mkv"
     ]
     logging.info(f"HandBrakeCLI CMD (main feature): {' '.join(cmd)}")
