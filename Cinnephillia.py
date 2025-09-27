@@ -18,12 +18,12 @@ CUSTOM_PRESETS = {
     "bluray": {
         # Assumes 'bluray_preset.json' is located in the same directory as the script
         "file": os.path.join(SCRIPT_DIR, "Home_Theater_HQ_-_x265_10bit_CRF18.json"),
-        "name": "Home Theater HQ - x265 10bit CRF18"
+        "name": "my-home-theater-dtshd"
     },
     "4k": {
         # Assumes 'uhd_preset.json' is located in the same directory as the script
         "file": os.path.join(SCRIPT_DIR, "Home_Theatre_4K_-_x265_10bit_CRF20.json"),
-        "name": "Home Theatre 4K - x265 10bit CRF20"
+        "name": "UHD"
     }
 }
 
@@ -64,7 +64,9 @@ def detect_resolution(mkv_path):
             "ffprobe", "-v", "error", "-select_streams", "v:0",
             "-show_entries", "stream=width,height", "-of", "json", mkv_path
         ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Convert command list to properly quoted string for shell execution
+        cmd_string = ' '.join(f"'{arg}'" if ' ' in arg else arg for arg in cmd)
+        result = subprocess.run(cmd_string, shell=True, capture_output=True, text=True)
         probe = json.loads(result.stdout)
         stream = probe["streams"][0]
         return stream["width"], stream["height"]
@@ -87,14 +89,17 @@ def process_main_feature(src, out_dir, title, year, preset):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
     cmd = [
-        HANDBRAKE_CLI,
+        "HandBrakeCLI",
+        "--all-audio",  # Copy all tracks present
+        "-E", "copy:dtshd,copy:dts,copy:truehd,copy:ac3,copy",
+        "--audio-copy-mask", "truehd,dtshd,dts,ac3",
+        "--audio-fallback", "av_aac",
+        "--all-subtitles",
+        "-f", "mkv",
         "--preset-import-file", preset["file"],
         "--preset", preset["name"],
         "-i", src,
         "-o", output_file,
-        "--all-subtitles",
-        "--all-audio",
-        "-f", "mkv"
     ]
     logging.info(f"HandBrakeCLI CMD (main feature): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
