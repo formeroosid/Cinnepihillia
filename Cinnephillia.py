@@ -9,7 +9,13 @@ import json
 import argparse
 import re
 
-HANDBRAKE_CLI = "HandBrakeCLI"
+HANDBRAKE_CLI = [
+    "flatpak", "run",
+    "--filesystem=/mnt/bigbrother/Movies",
+    "--command=HandBrakeCLI",
+    "fr.handbrake.ghb"
+]
+
 
 # Path/names must match your HandBrake GUI exported custom presets.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -88,9 +94,8 @@ def select_preset(width, height):
 def process_main_feature(src, out_dir, title, year, preset):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
-    cmd = [
-        "HandBrakeCLI",
-        "--all-audio",  # Copy all tracks present
+    cmd = HANDBRAKE_CLI + [
+        "--all-audio",
         "-E", "copy:dtshd,copy:dts,copy:truehd,copy:ac3,copy",
         "--audio-copy-mask", "truehd,dtshd,dts,ac3",
         "--audio-fallback", "av_aac",
@@ -101,6 +106,7 @@ def process_main_feature(src, out_dir, title, year, preset):
         "-i", src,
         "-o", output_file,
     ]
+
     logging.info(f"HandBrakeCLI CMD (main feature): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     logging.info(f"{output_file} | {out_dir} | {preset['name']}")
@@ -112,13 +118,13 @@ def process_main_feature(src, out_dir, title, year, preset):
 def process_extra(src, out_dir, base, extra_preset_name):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{base}.mkv")
-    cmd = [
-        HANDBRAKE_CLI,
+    cmd = HANDBRAKE_CLI + [
         "--preset", extra_preset_name,
         "-i", src,
         "-o", output_file,
         "-a", "1", "--subtitle=1", "-f", "mkv"
     ]
+
     logging.info(f"HandBrakeCLI CMD (extras): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     logging.info(f"{output_file} | {out_dir} | {extra_preset_name}")
