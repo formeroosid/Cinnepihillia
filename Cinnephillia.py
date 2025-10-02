@@ -45,6 +45,58 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+def detect_audio_tracks(mkv_path):
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=index,codec_name,channels:stream_tags=language",
+        "-of", "json", mkv_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    probe = json.loads(result.stdout)
+    tracks = []
+    for stream in probe.get("streams", []):
+        idx = stream.get("index")
+        codec = stream.get("codec_name")
+        channels = stream.get("channels")
+        lang = stream.get("tags", {}).get("language", "und")
+        tracks.append({
+            "index": idx,   # HandBrake uses 1-based indexing
+            "codec": codec,
+            "channels": channels,
+            "language": lang
+        })
+    return tracks
+
+def build_audio_args(audio_tracks):
+    indices = [str(track["index"]) for track in audio_tracks]
+    encoders = []
+    copy_mask = set()
+    fallback_needed = False
+
+    for track in audio_tracks:
+        c = track["codec_name"] if "codec_name" in track else track["codec"]
+        if c == "truehd":
+            encoders.append("copy:truehd")
+            copy_mask.add("truehd")
+        elif c in ("ac3", "eac3"):
+            encoders.append("copy:ac3")
+            copy_mask.add("ac3")
+        elif c == "dts":
+            encoders.append("copy:dts")
+            copy_mask.add("dts")
+        else:
+            encoders.append("av_aac")  # fallback encoding
+            fallback_needed = True
+
+    audio_args = [
+        "-a", ",".join(indices),
+        "-E", ",".join(encoders),
+        "--audio-copy-mask", ",".join(copy_mask)
+    ]
+    if fallback_needed:
+        audio_args += ["--audio-fallback", "av_aac"]
+    return audio_args
+
 def ensure_dir_permissions(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     user = getpass.getuser()
@@ -94,11 +146,9 @@ def select_preset(width, height):
 def process_main_feature(src, out_dir, title, year, preset):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
-    cmd = HANDBRAKE_CLI + [
-        "--all-audio",
-        "-E", "copy:dtshd,copy:dts,copy:truehd,copy:ac3,copy",
-        "--audio-copy-mask", "truehd,dtshd,dts,ac3",
-        "--audio-fallback", "av_aac",
+    audio_tracks = detect_audio_tracks(src)
+    audio_args = build_audio_args(audio_tracks)
+    cmd = HANDBRAKE_CLI + audio_args + [
         "--all-subtitles",
         "-f", "mkv",
         "--preset-import-file", preset["file"],
@@ -107,9 +157,13 @@ def process_main_feature(src, out_dir, title, year, preset):
         "-o", output_file,
     ]
 
+    logging.info(f"Audio Arguments: {audio_args}")
+    logging.info(f"Audio tracks detected: {audio_tracks}")
+    logging.info(f"HandBrakeCLI audio args")
     logging.info(f"HandBrakeCLI CMD (main feature): {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     logging.info(f"{output_file} | {out_dir} | {preset['name']}")
+
     if result.returncode != 0:
         logging.error(f"Main feature failed: {result.stderr}")
     else:
@@ -133,8 +187,6 @@ def process_extra(src, out_dir, base, extra_preset_name):
         logging.error(f"Extra failed: {result.stderr}")
     else:
         logging.info("Extra processed successfully.")
-
-
 
 def main(movie_root, mode):
     title, year = get_movie_info(movie_root)
