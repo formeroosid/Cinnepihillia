@@ -1,0 +1,63 @@
+import argparse
+from pathlib import Path
+
+from cinephillia.shared.logging_config import setup_logging
+from cinephillia.tv.tv_pipeline import process_tv_series
+from cinephillia.tv.inventory import inventory_report, print_inventory
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Cinephillia TV Processor")
+    sub = parser.add_subparsers(dest="command")
+
+    # --- process ---
+    proc = sub.add_parser("process", help="Encode and organise a TV series")
+    proc.add_argument("--input", required=True, type=Path)
+    proc.add_argument("--staging", required=True, type=Path)
+    proc.add_argument("--output", required=True, type=Path)
+    proc.add_argument("--series", required=True)
+    proc.add_argument("--duration-min", type=int, default=2400)
+    proc.add_argument("--duration-max", type=int, default=3200)
+    proc.add_argument("--plex-host", default=None)
+    proc.add_argument("--dry-run", action="store_true")
+
+    # --- inventory ---
+    inv = sub.add_parser("inventory", help="Check collection against TVDB")
+    inv.add_argument("--series", required=True)
+    inv.add_argument("--plex-dir", type=Path, default=None)
+    inv.add_argument("--input", type=Path, default=None)
+    inv.add_argument("--duration-min", type=int, default=2400)
+    inv.add_argument("--duration-max", type=int, default=3200)
+
+    args = parser.parse_args()
+    setup_logging()
+
+    if args.command == "process":
+        process_tv_series(
+            input_root=args.input,
+            staging_dir=args.staging,
+            output_root=args.output,
+            series_name=args.series,
+            episode_duration_range=(args.duration_min, args.duration_max),
+            plex_host=args.plex_host,
+            dry_run=args.dry_run,
+        )
+    elif args.command == "inventory":
+        if args.plex_dir:
+            report = inventory_report(args.series, plex_series_root=args.plex_dir)
+        elif args.input:
+            from cinephillia.tv.disc_parser import parse_tv_input
+            from cinephillia.tv.episode_classifier import classify_titles
+            titles = parse_tv_input(args.input)
+            episodes, _ = classify_titles(
+                titles, (args.duration_min, args.duration_max))
+            report = inventory_report(args.series, ripped_episodes=episodes)
+        else:
+            report = inventory_report(args.series)
+        print_inventory(report)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
