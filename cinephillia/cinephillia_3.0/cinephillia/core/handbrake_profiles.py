@@ -9,8 +9,8 @@ PROFILES_DIR = os.path.normpath(
 
 CUSTOM_PRESETS = {
     "sd_dvd": {
-        "file": os.path.join(PROFILES_DIR, "Home_Theatre_SD_DVD_x265_10bit_CRF20.json"),
-        "name": "SD-DVD",  # Verify this matches PresetName inside the JSON
+        "file": os.path.join(PROFILES_DIR, "SD_TV_-_x265_8bit_CRF22.json"),
+        "name": "SD TV x265 CRF22",  # Verify this matches PresetName inside the JSON
     },
     "bluray": {
         "file": os.path.join(PROFILES_DIR, "Home_Theater_HQ_-_x265_10bit_CRF18.json"),
