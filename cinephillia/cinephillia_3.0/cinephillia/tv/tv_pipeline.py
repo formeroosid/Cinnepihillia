@@ -1,9 +1,8 @@
 import logging
 from pathlib import Path
-from collections import defaultdict
 
 from cinephillia.core.detection import detect_audio_tracks, build_audio_args
-from cinephillia.core.handbrake_profiles import select_preset
+from cinephillia.core.handbrake_profiles import select_preset, get_preset_override
 from cinephillia.core.handbrake_runner import encode_with_preset
 from cinephillia.shared.file_ops import ensure_dir_permissions
 from cinephillia.tv.disc_parser import parse_tv_input
@@ -15,15 +14,16 @@ log = logging.getLogger(__name__)
 
 
 def process_tv_series(input_root, staging_dir, output_root, series_name,
-                      episode_duration_range=(2400, 3200),
-                      plex_host=None, dry_run=False):
+                      duration_min=None, duration_max=None, plex_host=None,
+                      encode_profile=None, dry_run=False):
     input_root = Path(input_root)
     staging_dir = Path(staging_dir)
     output_root = Path(output_root)
 
     # --- Pre-flight inventory ---
     titles = parse_tv_input(input_root)
-    episodes, extras = classify_titles(titles, episode_duration_range)
+    episodes, extras = classify_titles(titles, (duration_min, duration_max))
+
 
     pre_report = inventory_report(series_name, ripped_episodes=episodes)
     print_inventory(pre_report)
@@ -32,9 +32,14 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
         return pre_report
 
     # --- Phase 1: Encode episodes using core HandBrake pipeline ---
+    # --- Phase 1: Encode episodes using core HandBrake pipeline ---
     for ep in episodes:
         mi = ep["media_info"]
-        preset = select_preset(mi["width"], mi["height"])
+        if encode_profile:
+            preset = get_preset_override(encode_profile)
+        else:
+            preset = select_preset(mi["width"], mi["height"])
+
         audio_tracks = detect_audio_tracks(str(ep["path"]))
         audio_args = build_audio_args(audio_tracks)
 
@@ -42,10 +47,17 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
         out_path = staging_dir / rel_path.with_suffix(".mkv")
         ensure_dir_permissions(str(out_path.parent))
 
+        # FIX 1: Skip if already encoded
+        if out_path.exists() and out_path.stat().st_size > 0:
+            log.info("Skipping (already encoded): %s", out_path)
+            continue
+
         encode_with_preset(str(ep["path"]), str(out_path), preset,
                            audio_args=audio_args)
 
     # --- Phase 2: FileBot AMC rename into Plex structure ---
+    ensure_dir_permissions(str(output_root))
+
     rename_with_amc(
         input_dir=staging_dir,
         output_root=output_root,
@@ -54,7 +66,6 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
     )
 
     # --- Post-flight inventory ---
-    import glob
     plex_matches = list(output_root.glob(f"{series_name}*"))
     if plex_matches:
         post_report = inventory_report(series_name,

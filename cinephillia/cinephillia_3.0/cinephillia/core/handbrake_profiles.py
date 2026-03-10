@@ -13,8 +13,8 @@ CUSTOM_PRESETS = {
         "name": "SD TV x265 CRF22",  # Verify this matches PresetName inside the JSON
     },
     "bluray": {
-        "file": os.path.join(PROFILES_DIR, "Home_Theater_HQ_-_x265_10bit_CRF18.json"),
-        "name": "my-home-theater-dtshd",
+        "file": os.path.join(PROFILES_DIR, "SD_TV_-_x265_8bit_CRF22.json"),
+        "name": "SD TV x265 CRF22",
     },
     "4k": {
         "file": os.path.join(PROFILES_DIR, "Home_Theatre_4K_-_x265_10bit_CRF20.json"),
@@ -38,3 +38,16 @@ def select_preset(width, height):
         return CUSTOM_PRESETS["sd_dvd"]
     log.info(f"Detected BluRay/HD ({width}x{height}).")
     return CUSTOM_PRESETS["bluray"]
+
+PROFILE_ALIASES = {
+    "4k": "4k",
+    "bluray": "bluray",
+    "dvd": "sd_dvd",
+    "sd": "sd_dvd",
+}
+
+def get_preset_override(encode_profile):
+    """Return preset dict for a CLI --encode override."""
+    key = PROFILE_ALIASES[encode_profile]
+    log.info(f"Profile override: --encode {encode_profile} → {CUSTOM_PRESETS[key]['name']}")
+    return CUSTOM_PRESETS[key]

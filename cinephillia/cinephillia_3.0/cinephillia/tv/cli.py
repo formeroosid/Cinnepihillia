@@ -20,6 +20,8 @@ def main():
     proc.add_argument("--duration-max", type=int, default=3200)
     proc.add_argument("--plex-host", default=None)
     proc.add_argument("--dry-run", action="store_true")
+    proc.add_argument("--encode", choices=["4k", "bluray", "dvd", "sd"], default=None,
+                      help="Override automatic profile detection (4k, bluray, dvd, sd)")
 
     # --- inventory ---
     inv = sub.add_parser("inventory", help="Check collection against TVDB")
@@ -38,8 +40,10 @@ def main():
             staging_dir=args.staging,
             output_root=args.output,
             series_name=args.series,
-            episode_duration_range=(args.duration_min, args.duration_max),
+            duration_min=args.duration_min,
+            duration_max=args.duration_max,
             plex_host=args.plex_host,
+            encode_profile=args.encode,
             dry_run=args.dry_run,
         )
     elif args.command == "inventory":
