@@ -65,6 +65,9 @@ python3 -m cinephillia.tv.cli process \
   --series "Quantum Leap" \
   --encode sd
 ```
+Plex TV library path: Point Plex at the parent of your series folders (e.g., /mnt/bigbrother/TV/), where each series like Genius (2017)/Plex Movie Folders/ contains Season X/ directories directly.
+
+
 
 ### CLI Arguments
 
@@ -144,12 +147,15 @@ The `SxDx` folder naming convention helps the classifier and FileBot with season
 ## Output Structure (Plex-Ready)
 
 ```
-~/media/plex/
-└── Quantum Leap/
-    └── Season 1/
-        ├── Quantum Leap - S01E01 - July 13th, 1985.mkv
-        ├── Quantum Leap - S01E02 - Star-Crossed.mkv
-        └── ...
+Plex Movie Folders/
+├── Season 1/
+│   ├── Genius - S01E01 - Chapter One.mkv
+│   ├── Genius - S01E02 - Chapter Two.mkv
+│   └── ...
+├── Behind The Scenes/
+├── Featurettes/
+└── ...
+
 ```
 
 ---

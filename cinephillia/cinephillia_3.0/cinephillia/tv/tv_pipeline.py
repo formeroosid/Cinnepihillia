@@ -7,10 +7,31 @@ from cinephillia.core.handbrake_runner import encode_with_preset
 from cinephillia.shared.file_ops import ensure_dir_permissions
 from cinephillia.tv.disc_parser import parse_tv_input
 from cinephillia.tv.episode_classifier import classify_titles
-from cinephillia.tv.filebot_renamer import rename_with_amc
+from cinephillia.tv.filebot_renamer import rename_with_query
 from cinephillia.tv.inventory import inventory_report, print_inventory
 
 log = logging.getLogger(__name__)
+
+
+def _prepare_rename_staging(staging_dir, series_name):
+    staging_dir = Path(staging_dir)
+    rename_dir = staging_dir / "_filebot_stage"
+
+    if rename_dir.exists():
+        for old_link in rename_dir.iterdir():
+            old_link.unlink()
+    rename_dir.mkdir(exist_ok=True)
+
+    files = sorted(staging_dir.rglob("*.mkv"))
+    files = [f for f in files if "_filebot_stage" not in str(f)]
+
+    for i, f in enumerate(files, 1):
+        link = rename_dir / f"{series_name} - E{i:02d}.mkv"
+        link.symlink_to(f.resolve())
+        log.info("Staging symlink: %s -> %s", link.name, f)
+
+    log.info("Prepared %d files for FileBot rename", len(files))
+    return rename_dir
 
 
 def process_tv_series(input_root, staging_dir, output_root, series_name,
@@ -20,10 +41,8 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
     staging_dir = Path(staging_dir)
     output_root = Path(output_root)
 
-    # --- Pre-flight inventory ---
     titles = parse_tv_input(input_root)
     episodes, extras = classify_titles(titles, (duration_min, duration_max))
-
 
     pre_report = inventory_report(series_name, ripped_episodes=episodes)
     print_inventory(pre_report)
@@ -31,8 +50,6 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
     if dry_run:
         return pre_report
 
-    # --- Phase 1: Encode episodes using core HandBrake pipeline ---
-    # --- Phase 1: Encode episodes using core HandBrake pipeline ---
     for ep in episodes:
         mi = ep["media_info"]
         if encode_profile:
@@ -47,7 +64,6 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
         out_path = staging_dir / rel_path.with_suffix(".mkv")
         ensure_dir_permissions(str(out_path.parent))
 
-        # FIX 1: Skip if already encoded
         if out_path.exists() and out_path.stat().st_size > 0:
             log.info("Skipping (already encoded): %s", out_path)
             continue
@@ -55,17 +71,16 @@ def process_tv_series(input_root, staging_dir, output_root, series_name,
         encode_with_preset(str(ep["path"]), str(out_path), preset,
                            audio_args=audio_args)
 
-    # --- Phase 2: FileBot AMC rename into Plex structure ---
-    ensure_dir_permissions(str(output_root))
+    output_root.mkdir(parents=True, exist_ok=True)
+    rename_dir = _prepare_rename_staging(staging_dir, series_name)
 
-    rename_with_amc(
-        input_dir=staging_dir,
+    rename_with_query(
+        input_dir=rename_dir,
         output_root=output_root,
-        plex_host=plex_host,
-        exclude_list=staging_dir / "amc_exclude.txt",
+        series_name=series_name,
+        series_format="Season {s}/{n} - {s00e00} - {t}",
     )
 
-    # --- Post-flight inventory ---
     plex_matches = list(output_root.glob(f"{series_name}*"))
     if plex_matches:
         post_report = inventory_report(series_name,

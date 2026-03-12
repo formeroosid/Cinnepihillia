@@ -17,7 +17,7 @@ def main():
     proc.add_argument("--output", required=True, type=Path)
     proc.add_argument("--series", required=True)
     proc.add_argument("--duration-min", type=int, default=2400)
-    proc.add_argument("--duration-max", type=int, default=3200)
+    proc.add_argument("--duration-max", type=int, default=5400)
     proc.add_argument("--plex-host", default=None)
     proc.add_argument("--dry-run", action="store_true")
     proc.add_argument("--encode", choices=["4k", "bluray", "dvd", "sd"], default=None,
@@ -29,7 +29,7 @@ def main():
     inv.add_argument("--plex-dir", type=Path, default=None)
     inv.add_argument("--input", type=Path, default=None)
     inv.add_argument("--duration-min", type=int, default=2400)
-    inv.add_argument("--duration-max", type=int, default=3200)
+    inv.add_argument("--duration-max", type=int, default=5400)
 
     args = parser.parse_args()
     setup_logging()

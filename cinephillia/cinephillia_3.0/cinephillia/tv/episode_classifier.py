@@ -4,7 +4,7 @@ from cinephillia.core.media_analyzer import detect_resolution, get_duration
 log = logging.getLogger(__name__)
 
 
-def classify_titles(titles, episode_duration_range=(2400, 3200)):
+def classify_titles(titles, episode_duration_range=(2400, 5400)):
     """
     Split parsed titles into episodes vs extras based on duration.
     Attaches media_info dict to each title.
