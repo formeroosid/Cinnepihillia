@@ -5,11 +5,6 @@ import shlex
 
 log = logging.getLogger(__name__)
 
-# Keep these old names so imports don’t break.
-HANDBRAKE_CLI_BASE = []
-FLATPAK_APP = "fr.handbrake.ghb"
-PROFILES_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 def _run_ffprobe_streams(src, stream_type):
     """
@@ -18,10 +13,15 @@ def _run_ffprobe_streams(src, stream_type):
     Returns list of dicts with keys: index, codec_name, profile, language.
     """
     cmd = [
-        "ffprobe", "-v", "quiet",
-        "-select_streams", stream_type,
-        "-show_entries", "stream=index,codec_name,profile:stream_tags=language",
-        "-of", "csv=p=0",
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-select_streams",
+        stream_type,
+        "-show_entries",
+        "stream=index,codec_name,profile:stream_tags=language",
+        "-of",
+        "csv=p=0",
         src,
     ]
     log.debug(f"ffprobe CMD: {' '.join(shlex.quote(c) for c in cmd)}")
@@ -52,84 +52,123 @@ def _run_ffprobe_streams(src, stream_type):
 
 def _select_dtshd_like_audio(audio_streams):
     """
-    Prioritize:
+    Pick best audio stream with this priority:
       1) DTS-HD MA in English
       2) Any DTS in English
       3) First audio stream
     Returns index as string or None.
     """
+    # 1) DTS-HD MA (profile) in English
     for s in audio_streams:
-        if s["codec_name"].startswith("dts") and "DTS-HD MA" in s.get("profile", "") \
-           and (s["language"] in ("eng", "") or not s["language"]):
-            return s["index"]
+        if s["codec_name"].startswith("dts") and "DTS-HD MA" in s.get("profile", ""):
+            if s["language"] in ("eng", "") or not s["language"]:
+                return s["index"]
 
+    # 2) Any DTS in English
     for s in audio_streams:
-        if s["codec_name"].startswith("dts") and (s["language"] in ("eng", "") or not s["language"]):
-            return s["index"]
+        if s["codec_name"].startswith("dts"):
+            if s["language"] in ("eng", "") or not s["language"]:
+                return s["index"]
 
+    # 3) Fallback: first audio
     return audio_streams[0]["index"] if audio_streams else None
 
 
 def _select_first_english_sub(sub_streams):
+    """
+    Return index of first English (or untagged) subtitle stream, or None.
+    """
     for s in sub_streams:
         if s["language"] in ("eng", "") or not s["language"]:
             return s["index"]
     return None
 
 
-def encode_with_preset(src, output_file, preset, audio_args=None, extra_flags=None):
+def encode_with_profile(src, output_file, profile, copy_audio_only=True):
     """
-    New ffmpeg-based implementation that replaces the old HandBrake CLI.
-    - src: input MKV
+    Run ffmpeg with the given profile dict (from ffmpeg_profiles/select_preset).
+
+    - src: input MKV path
     - output_file: output MKV path
-    - preset: dict from handbrake_profiles.select_preset() with 'video_args'
-    - audio_args / extra_flags: accepted for compatibility but ignored
-      (ffmpeg selection is automatic).
+    - profile: dict containing at least:
+          {
+              "name": "bluray" | "4k" | "sd",
+              "video_args": [ ... ffmpeg video options ... ]
+          }
+      where video_args contains only output-side options (filters, codec, rc, qp, profile),
+      NOT hwaccel flags.
+    - copy_audio_only: kept for compatibility; always copy audio streams.
+
+    Behavior:
+      * 1 video stream: 0:v:0
+      * ALL audio streams: 0:a
+      * First English (or untagged) subtitle, if present
+      * Mark "best" audio (DTS-HD / DTS English) as default
     """
-    del audio_args, extra_flags  # unused but kept for signature compatibility
+    del copy_audio_only  # we always copy all audio streams
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     audio_streams = _run_ffprobe_streams(src, "a")
     sub_streams = _run_ffprobe_streams(src, "s")
 
-    audio_idx = _select_dtshd_like_audio(audio_streams)
-    sub_idx = _select_first_english_sub(sub_streams)
-
-    if audio_idx is None:
+    if not audio_streams:
         log.error(f"No audio streams found in {src}")
         return subprocess.CompletedProcess(args=[], returncode=1)
 
-    map_args = ["-map", "0:v:0", "-map", f"0:{audio_idx}"]
+    audio_idx = _select_dtshd_like_audio(audio_streams)
+    sub_idx = _select_first_english_sub(sub_streams)
+
+    # --- Build mapping: video + all audio + optional first subtitle ---
+    map_args = ["-map", "0:v:0", "-map", "0:a"]  # keep ALL audio tracks
+
     sub_args = []
     if sub_idx is not None:
         map_args += ["-map", f"0:{sub_idx}"]
         sub_args = ["-c:s", "copy", "-disposition:s:0", "default"]
+
+    # Determine which audio stream becomes default.
+    # Because we map "-map 0:a", ffmpeg preserves input audio order, so we
+    # find the position of audio_idx in the original list.
+    default_audio_pos = 0
+    if audio_idx is not None:
+        for i, s in enumerate(audio_streams):
+            if s["index"] == audio_idx:
+                default_audio_pos = i
+                break
 
     cmd = [
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
         "-y",
-        # HW accel belongs here → applies to the input
-        "-hwaccel", "vaapi",
-        "-hwaccel_output_format", "vaapi",
-        "-vaapi_device", "/dev/dri/renderD128",
-        "-i", src,
+        # VAAPI hardware accel (applies to input, so must be before -i)
+        "-hwaccel",
+        "vaapi",
+        "-hwaccel_output_format",
+        "vaapi",
+        "-vaapi_device",
+        "/dev/dri/renderD128",
+        "-i",
+        src,
         *map_args,
-        "-map_metadata", "-1",
-        *preset["video_args"],  # now only filter/codec/rc/profile
-        "-c:a", "copy",
+        "-map_metadata",
+        "-1",
+        *profile["video_args"],
+        "-c:a",
+        "copy",
         *sub_args,
-        "-max_muxing_queue_size", "9999",
+        # Mark chosen best audio stream as default
+        f"-disposition:a:{default_audio_pos}",
+        "default",
+        "-max_muxing_queue_size",
+        "9999",
         output_file,
     ]
 
     log.info(f"FFmpeg CMD: {' '.join(shlex.quote(c) for c in cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.stderr:
-        log.debug(f"ffmpeg stderr (tail): {result.stderr[-2000:]}")
+    # For long ffmpeg runs, don't capture_output to avoid large-buffer issues.
+    result = subprocess.run(cmd, text=True)
 
     if result.returncode != 0:
         log.error(f"Encode failed (rc={result.returncode}) for {src}")
@@ -153,8 +192,8 @@ def encode_extra(src, output_file, preset_name):
     Extras encode — same function name, now ffmpeg-based.
     Currently just uses the BluRay/HD profile; preset_name kept for logging.
     """
-    from .handbrake_profiles import _bluray_profile  # local import to avoid cycles
+    from .ffmpeg_profiles import _bluray_profile  # local import to avoid cycles
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
-    preset = _bluray_profile()
-    return encode_with_preset(src, output_file, preset)
+    profile = _bluray_profile()
+    return encode_with_profile(src, output_file, profile)

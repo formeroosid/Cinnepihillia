@@ -2,17 +2,18 @@ import logging
 
 log = logging.getLogger(__name__)
 
-# We keep EXTRAS_PRESET_NAME for compatibility; it's now just a label.
-EXTRAS_PRESET_NAME = "extras_720p"
+# These profiles are intentionally similar to your HandBrake presets,
+# but expressed in ffmpeg terms instead of JSON HandBrake presets.
+# You can tune qp, filters, etc. to taste.
 
+EXTRAS_PRESET_NAME = "extras_720p"  # used just as a label
 
 def select_preset(width, height):
     """
-    Choose an ffmpeg profile based on video resolution.
-    Returns a dict with:
-      - name: profile label
-      - video_args: list[str] of ffmpeg video options (includes VAAPI bits)
-    This preserves the old API signature used by movie_pipeline.process_movie.
+    Choose an ffmpeg profile based on resolution.
+    Returns a dict with keys:
+      - name: label
+      - video_args: list[str] for ffmpeg video options
     """
     if width is None or height is None:
         log.info("Could not detect resolution, using BluRay/HD profile.")
@@ -30,36 +31,9 @@ def select_preset(width, height):
     return _bluray_profile()
 
 
-def _uhd_profile():
-    return {
-        "name": "4k_vaapi_main10",
-        "video_args": [
-            # no -hwaccel / -vaapi_device here
-            "-vf", "scale_vaapi=format=p010",
-            "-c:v", "hevc_vaapi",
-            "-rc_mode", "CQP",
-            "-qp", "20",
-            "-profile:v", "main10",
-        ],
-    }
-
-
-def _bluray_profile():
-    return {
-        "name": "bluray_vaapi_main10",
-        "video_args": [
-            "-vf", "scale_vaapi=format=p010",
-            "-c:v", "hevc_vaapi",
-            "-rc_mode", "CQP",
-            "-qp", "22",
-            "-profile:v", "main10",
-        ],
-    }
-
-
 def _sd_profile():
     return {
-        "name": "sd_vaapi_main",
+        "name": "sd",
         "video_args": [
             "-vf", "scale_vaapi=format=p010",
             "-c:v", "hevc_vaapi",
@@ -69,10 +43,34 @@ def _sd_profile():
         ],
     }
 
+def _bluray_profile():
+    return {
+        "name": "bluray",
+        "video_args": [
+            "-vf", "scale_vaapi=format=p010",
+            "-c:v", "hevc_vaapi",
+            "-rc_mode", "CQP",
+            "-qp", "22",
+            "-profile:v", "main10",
+        ],
+    }
+
+def _uhd_profile():
+    return {
+        "name": "4k",
+        "video_args": [
+            "-vf", "scale_vaapi=format=p010",
+            "-c:v", "hevc_vaapi",
+            "-rc_mode", "CQP",
+            "-qp", "20",
+            "-profile:v", "main10",
+        ],
+    }
+
 
 
 PROFILE_ALIASES = {
-    "4k": "4k",
+    "4k": "uhd",
     "bluray": "bluray",
     "dvd": "sd_dvd",
     "sd": "sd_dvd",
@@ -80,17 +78,14 @@ PROFILE_ALIASES = {
 
 
 def get_preset_override(encode_profile):
-    """
-    Kept for compatibility if you later add a --encode CLI.
-    Returns the same style dict as select_preset.
-    """
+    """Return profile dict for a CLI --encode override in future, if you add it."""
     key = PROFILE_ALIASES[encode_profile]
-    if key == "4k":
-        preset = _uhd_profile()
+    # Reuse the helpers:
+    if key == "uhd":
+        p = _uhd_profile()
     elif key == "sd_dvd":
-        preset = _sd_profile()
+        p = _sd_profile()
     else:
-        preset = _bluray_profile()
-
-    log.info(f"Profile override: --encode {encode_profile} → {preset['name']}")
-    return preset
+        p = _bluray_profile()
+    log.info(f"Profile override: --encode {encode_profile} → {p['name']}")
+    return p

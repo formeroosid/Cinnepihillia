@@ -3,10 +3,9 @@ import re
 import sys
 import logging
 
-from cinephillia.core.detection import detect_audio_tracks, build_audio_args
 from cinephillia.core.media_analyzer import detect_resolution
-from cinephillia.core.handbrake_profiles import select_preset, EXTRAS_PRESET_NAME
-from cinephillia.core.handbrake_runner import encode_with_preset, encode_extra
+from cinephillia.core.ffmpeg_profiles import select_preset, EXTRAS_PRESET_NAME
+from cinephillia.core.ffmpeg_runner import encode_with_profile, encode_extra
 from cinephillia.shared.file_ops import ensure_dir_permissions
 
 log = logging.getLogger(__name__)
@@ -35,14 +34,10 @@ def identify_main_feature(files):
 def process_main_feature(src, out_dir, title, year, preset):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
-    audio_tracks = detect_audio_tracks(src)
-    audio_args = build_audio_args(audio_tracks)
 
-    log.info(f"Audio tracks detected: {audio_tracks}")
-    log.info(f"Audio arguments: {audio_args}")
-
-    encode_with_preset(src, output_file, preset, audio_args=audio_args)
-
+    # ffmpeg_runner will handle audio/sub detection & mapping.
+    log.info(f"Encoding main feature: {src} → {output_file} using profile {preset['name']}")
+    encode_with_profile(src, output_file, preset)
 
 def process_extra(src, out_dir, base):
     ensure_dir_permissions(out_dir)
