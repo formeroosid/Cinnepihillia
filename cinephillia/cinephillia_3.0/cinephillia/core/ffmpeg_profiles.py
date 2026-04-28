@@ -62,7 +62,7 @@ def _uhd_profile():
             "-vf", "scale_vaapi=format=p010",
             "-c:v", "hevc_vaapi",
             "-rc_mode", "CQP",
-            "-qp", "20",
+            "-qp", "24",
             "-profile:v", "main10",
         ],
     }

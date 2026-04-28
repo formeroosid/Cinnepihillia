@@ -196,4 +196,4 @@ def encode_extra(src, output_file, preset_name):
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
     profile = _bluray_profile()
-    return encode_with_profile(src, output_file, profile)
+    return encode_with_profile(src, output_file, profile)   
