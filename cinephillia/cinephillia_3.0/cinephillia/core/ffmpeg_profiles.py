@@ -35,11 +35,13 @@ def _sd_profile():
     return {
         "name": "sd",
         "video_args": [
-            "-vf", "scale_vaapi=format=p010",
+            # Match the working CLI: system memory -> nv12 -> hwupload -> hevc_vaapi
+            "-vf", "format=nv12,hwupload",
             "-c:v", "hevc_vaapi",
-            "-rc_mode", "CQP",
-            "-qp", "22",
-            "-profile:v", "main",
+            "-b:v", "5M",
+            # Optional: let VAAPI choose profile/level from the input,
+            # so we don't force something unsupported
+            # "-profile:v", "main",
         ],
     }
 

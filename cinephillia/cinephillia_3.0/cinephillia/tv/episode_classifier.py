@@ -1,34 +1,30 @@
 import logging
-from cinephillia.core.media_analyzer import detect_resolution, get_duration
 
 log = logging.getLogger(__name__)
 
 
-def classify_titles(titles, episode_duration_range=(2400, 5400)):
-    """
-    Split parsed titles into episodes vs extras based on duration.
-    Attaches media_info dict to each title.
-    """
-    lo, hi = episode_duration_range
+def classify_titles(titles, duration_range):
+    lo, hi = duration_range
     episodes = []
     extras = []
 
     for t in titles:
-        path_str = str(t["path"])
-        duration = get_duration(path_str)
-        width, height = detect_resolution(path_str)
-        media_info = {
-            "duration_seconds": duration,
-            "width": width,
-            "height": height,
-        }
-        enriched = {**t, "media_info": media_info}
+        duration = t.get("duration_minutes")
 
-        if lo <= duration <= hi:
-            episodes.append(enriched)
-        else:
-            extras.append(enriched)
-            log.info(f"Classified as extra ({duration:.0f}s): {t['path'].name}")
+        # Skip titles with no duration; be conservative and treat as extra
+        if duration is None:
+            extras.append(t)
+            continue
 
-    log.info(f"Classified {len(episodes)} episodes, {len(extras)} extras")
+        if lo is not None and duration < lo:
+            extras.append(t)
+            continue
+
+        if hi is not None and duration > hi:
+            extras.append(t)
+            continue
+
+        episodes.append(t)
+
+    log.info("Classified %d episodes, %d extras", len(episodes), len(extras))
     return episodes, extras

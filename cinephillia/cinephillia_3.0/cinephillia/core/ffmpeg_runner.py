@@ -98,12 +98,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
       where video_args contains only output-side options (filters, codec, rc, qp, profile),
       NOT hwaccel flags.
     - copy_audio_only: kept for compatibility; always copy audio streams.
-
-    Behavior:
-      * 1 video stream: 0:v:0
-      * ALL audio streams: 0:a
-      * First English (or untagged) subtitle, if present
-      * Mark "best" audio (DTS-HD / DTS English) as default
     """
     del copy_audio_only  # we always copy all audio streams
 
@@ -128,8 +122,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         sub_args = ["-c:s", "copy", "-disposition:s:0", "default"]
 
     # Determine which audio stream becomes default.
-    # Because we map "-map 0:a", ffmpeg preserves input audio order, so we
-    # find the position of audio_idx in the original list.
     default_audio_pos = 0
     if audio_idx is not None:
         for i, s in enumerate(audio_streams):
@@ -142,11 +134,7 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         "-hide_banner",
         "-nostdin",
         "-y",
-        # VAAPI hardware accel (applies to input, so must be before -i)
-        "-hwaccel",
-        "vaapi",
-        "-hwaccel_output_format",
-        "vaapi",
+        # IMPORTANT: no decode-side hwaccel here; let profiles handle hwupload
         "-vaapi_device",
         "/dev/dri/renderD128",
         "-i",
@@ -158,7 +146,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         "-c:a",
         "copy",
         *sub_args,
-        # Mark chosen best audio stream as default
         f"-disposition:a:{default_audio_pos}",
         "default",
         "-max_muxing_queue_size",
@@ -167,7 +154,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
     ]
 
     log.info(f"FFmpeg CMD: {' '.join(shlex.quote(c) for c in cmd)}")
-    # For long ffmpeg runs, don't capture_output to avoid large-buffer issues.
     result = subprocess.run(cmd, text=True)
 
     if result.returncode != 0:
@@ -196,4 +182,4 @@ def encode_extra(src, output_file, preset_name):
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
     profile = _bluray_profile()
-    return encode_with_profile(src, output_file, profile)   
+    return encode_with_profile(src, output_file, profile)
