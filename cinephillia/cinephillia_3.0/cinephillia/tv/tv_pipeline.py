@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 from cinephillia.core.media_analyzer import detect_resolution
@@ -7,33 +8,14 @@ from cinephillia.core.ffmpeg_runner import encode_with_profile
 from cinephillia.shared.file_ops import ensure_dir_permissions
 from cinephillia.tv.disc_parser import parse_tv_input
 from cinephillia.tv.episode_classifier import classify_titles
-from cinephillia.tv.filebot_renamer import rename_with_query
-from cinephillia.tv.inventory import inventory_report, print_inventory
+from cinephillia.tv.inventory import (
+    inventory_report,
+    print_inventory,
+    print_sequential_inventory,
+    sequential_inventory_report,
+)
 
 log = logging.getLogger(__name__)
-
-def _prepare_rename_staging(staging_dir, series_name):
-    staging_dir = Path(staging_dir)
-    rename_dir = staging_dir / "_filebot_stage"
-
-    if rename_dir.exists():
-        for old_link in rename_dir.iterdir():
-            if old_link.is_symlink() or old_link.is_file():
-                old_link.unlink()
-    rename_dir.mkdir(parents=True, exist_ok=True)
-
-    files = sorted(staging_dir.rglob("*.mkv"))
-    files = [f for f in files if "_filebot_stage" not in str(f)]
-
-    for i, f in enumerate(files, 1):
-        link = rename_dir / f"{series_name} - E{i:02d}.mkv"
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        link.symlink_to(f.resolve())
-        log.info("Staging symlink: %s -> %s", link.name, f)
-
-    log.info("Prepared %d files for FileBot rename", len(files))
-    return rename_dir
 
 
 def _safe_relative(path, root):
@@ -42,6 +24,45 @@ def _safe_relative(path, root):
     if path.is_relative_to(root):
         return path.relative_to(root)
     return Path(path.name)
+
+
+def _default_expected_counts(episodes):
+    counts = defaultdict(int)
+    for ep in episodes:
+        counts[int(ep["season"])] += 1
+    return dict(counts)
+
+
+def _render_sequential_files(output_root, series_name, episodes):
+    output_root = Path(output_root)
+    rendered = []
+
+    episodes_by_season = defaultdict(list)
+    for ep in sorted(episodes, key=lambda e: (e["season"], e["disc"], e["title_num"], str(e["path"]))):
+        episodes_by_season[int(ep["season"])].append(ep)
+
+    for season, season_eps in sorted(episodes_by_season.items()):
+        season_folder = "Season" if season == 0 else f"Season {season}"
+        season_dir = output_root / season_folder
+        ensure_dir_permissions(str(season_dir))
+
+        for episode_num, ep in enumerate(season_eps, 1):
+            src = Path(ep.get("encoded_path") or ep["path"])
+            dest = season_dir / f"{series_name} S{season:02d}E{episode_num:02d}_.mkv"
+
+            if dest.exists() or dest.is_symlink():
+                dest.unlink()
+            dest.symlink_to(src.resolve())
+
+            rendered.append({
+                "season": season,
+                "episode": episode_num,
+                "source": str(src),
+                "output": str(dest),
+            })
+            log.info("Rendered sequential TV file: %s -> %s", dest, src)
+
+    return rendered
 
 
 def process_tv_series(
@@ -54,6 +75,8 @@ def process_tv_series(
     plex_host=None,
     encode_profile=None,
     dry_run=False,
+    expected_counts=None,
+    use_metadata_rename=False,
 ):
     input_root = Path(input_root)
     staging_dir = Path(staging_dir)
@@ -66,18 +89,23 @@ def process_tv_series(
     else:
         episodes, _extras = classify_titles(titles, (duration_min, duration_max))
 
-    pre_report = inventory_report(series_name, ripped_episodes=episodes)
-    print_inventory(pre_report)
+    local_expected = expected_counts or _default_expected_counts(episodes)
+    pre_report = sequential_inventory_report(
+        series_name,
+        expected_counts=local_expected,
+        ripped_episodes=episodes,
+    )
+    print_sequential_inventory(pre_report, heading="TV RIP TALLY")
 
     if dry_run:
         return pre_report
 
     staging_dir.mkdir(parents=True, exist_ok=True)
 
-    for ep in episodes:
+    encoded_episodes = []
+    for ep in sorted(episodes, key=lambda e: (e["season"], e["disc"], e["title_num"], str(e["path"]))):
         src = Path(ep["path"])
 
-        # Detect resolution and choose a profile dict, same as movies
         width, height = detect_resolution(str(src))
         profile = select_preset(width, height)
 
@@ -88,33 +116,32 @@ def process_tv_series(
 
         if output_file.exists() and output_file.stat().st_size > 0:
             log.info("Skipping (already encoded): %s", output_file)
-            continue
+        else:
+            log.info(
+                "Encoding TV episode: %s -> %s using profile %s",
+                src,
+                output_file,
+                profile.get("name", "<unknown>"),
+            )
+            encode_with_profile(str(src), str(output_file), profile)
 
-        log.info(
-            "Encoding TV episode: %s -> %s using profile %s",
-            src,
-            output_file,
-            profile.get("name", "<unknown>"),
-        )
-        encode_with_profile(str(src), str(output_file), profile)
+        ep_copy = dict(ep)
+        ep_copy["encoded_path"] = str(output_file)
+        encoded_episodes.append(ep_copy)
 
     output_root.mkdir(parents=True, exist_ok=True)
-    rename_dir = _prepare_rename_staging(staging_dir, series_name)
 
-    rename_with_query(
-        input_dir=rename_dir,
-        output_root=output_root,
-        series_name=series_name,
-        series_format="Season {s}/{n} - {s00e00} - {t}",
+    if use_metadata_rename:
+        pre_metadata_report = inventory_report(series_name, ripped_episodes=episodes)
+        print_inventory(pre_metadata_report)
+        return pre_metadata_report
+
+    rendered_files = _render_sequential_files(output_root, series_name, encoded_episodes)
+    post_report = sequential_inventory_report(
+        series_name,
+        expected_counts=local_expected,
+        ripped_episodes=episodes,
+        rendered_files=rendered_files,
     )
-
-    plex_matches = list(output_root.glob(f"{series_name}*"))
-    if plex_matches:
-        post_report = inventory_report(
-            series_name,
-            plex_series_root=plex_matches[0],
-        )
-        print_inventory(post_report)
-        return post_report
-
-    return pre_report
+    print_sequential_inventory(post_report, heading="TV RENDER TALLY")
+    return post_report

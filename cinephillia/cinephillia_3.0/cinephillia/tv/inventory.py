@@ -60,6 +60,84 @@ def count_ripped_episodes(classified_episodes):
     return dict(counts)
 
 
+def count_rendered_episodes(rendered_files):
+    """Count rendered TV files per season from local sequential output."""
+    counts = defaultdict(int)
+    for item in rendered_files:
+        counts[item["season"]] += 1
+    return dict(counts)
+
+
+def sequential_inventory_report(series_name, expected_counts=None,
+                                ripped_episodes=None, rendered_files=None):
+    """
+    Build a local per-season tally without any TVDB/FileBot metadata lookup.
+    Useful for pure sequential TV rendering.
+    """
+    expected_counts = expected_counts or {}
+    ripped_counts = count_ripped_episodes(ripped_episodes or [])
+    rendered_counts = count_rendered_episodes(rendered_files or [])
+
+    seasons = sorted(set(expected_counts) | set(ripped_counts) | set(rendered_counts))
+
+    report = {
+        "summary": {
+            "series": series_name,
+            "total_expected": sum(expected_counts.values()) if expected_counts else None,
+            "total_ripped": sum(ripped_counts.values()),
+            "total_rendered": sum(rendered_counts.values()),
+        },
+        "seasons": {}
+    }
+
+    for season in seasons:
+        expected = expected_counts.get(season)
+        ripped = ripped_counts.get(season, 0)
+        rendered = rendered_counts.get(season, 0)
+        report["seasons"][season] = {
+            "expected_count": expected,
+            "ripped_count": ripped,
+            "rendered_count": rendered,
+            "ripped_matches_expected": expected is None or ripped == expected,
+            "rendered_matches_expected": expected is None or rendered == expected,
+        }
+
+    return report
+
+
+def print_sequential_inventory(report, heading="SEQUENTIAL TV INVENTORY"):
+    summary = report.get("summary", {})
+    print(f"\n{'='*60}")
+    print(f"  {heading}: {summary.get('series', 'Unknown')}")
+    if summary.get("total_expected") is None:
+        print(f"  Ripped: {summary.get('total_ripped', 0)} | Rendered: {summary.get('total_rendered', 0)}")
+    else:
+        print(
+            f"  Expected: {summary.get('total_expected', 0)} | "
+            f"Ripped: {summary.get('total_ripped', 0)} | "
+            f"Rendered: {summary.get('total_rendered', 0)}"
+        )
+    print(f"{'='*60}\n")
+
+    for season, info in sorted(report.get("seasons", {}).items()):
+        expected = info.get("expected_count")
+        ripped = info.get("ripped_count", 0)
+        rendered = info.get("rendered_count", 0)
+
+        if expected is None:
+            expected_str = " ?"
+            status = "OK"
+        else:
+            expected_str = f"{expected:2d}"
+            status = "OK" if ripped == expected else f"MISMATCH ({ripped - expected:+d})"
+
+        print(
+            f"  Season {season:02d}: ripped {ripped:2d} | "
+            f"expected {expected_str} | rendered {rendered:2d} | {status}"
+        )
+    print()
+
+
 def inventory_report(series_query, ripped_episodes=None,
                      plex_series_root=None, db="TheTVDB"):
     """

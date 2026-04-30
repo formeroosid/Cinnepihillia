@@ -46,7 +46,6 @@ def main():
         process_movie(str(root), args.mode)
         return
 
-    # TV mode
     series_name = args.series_name or root.name
     input_root = root / "rip"
     staging_dir = root / "process" / "staging"
@@ -62,6 +61,8 @@ def main():
         plex_host=None,
         encode_profile=None,
         dry_run=False,
+        expected_counts=None,
+        use_metadata_rename=False,
     )
 
 
