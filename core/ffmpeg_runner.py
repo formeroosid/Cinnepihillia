@@ -58,19 +58,16 @@ def _select_dtshd_like_audio(audio_streams):
       3) First audio stream
     Returns index as string or None.
     """
-    # 1) DTS-HD MA (profile) in English
     for s in audio_streams:
         if s["codec_name"].startswith("dts") and "DTS-HD MA" in s.get("profile", ""):
             if s["language"] in ("eng", "") or not s["language"]:
                 return s["index"]
 
-    # 2) Any DTS in English
     for s in audio_streams:
         if s["codec_name"].startswith("dts"):
             if s["language"] in ("eng", "") or not s["language"]:
                 return s["index"]
 
-    # 3) Fallback: first audio
     return audio_streams[0]["index"] if audio_streams else None
 
 
@@ -82,6 +79,14 @@ def _select_first_english_sub(sub_streams):
         if s["language"] in ("eng", "") or not s["language"]:
             return s["index"]
     return None
+
+def _normalize_language_tag(lang, fallback="eng"):
+    if not lang:
+        return fallback
+    lang = lang.strip().lower()
+    if lang in ("und", "unknown", "unk"):
+        return fallback
+    return lang
 
 
 def encode_with_profile(src, output_file, profile, copy_audio_only=True):
@@ -99,7 +104,7 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
       NOT hwaccel flags.
     - copy_audio_only: kept for compatibility; always copy audio streams.
     """
-    del copy_audio_only  # we always copy all audio streams
+    del copy_audio_only
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
@@ -113,15 +118,26 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
     audio_idx = _select_dtshd_like_audio(audio_streams)
     sub_idx = _select_first_english_sub(sub_streams)
 
-    # --- Build mapping: video + all audio + optional first subtitle ---
-    map_args = ["-map", "0:v:0", "-map", "0:a"]  # keep ALL audio tracks
+    map_args = ["-map", "0:v:0", "-map", "0:a"]
+
+    audio_metadata_args = []
+    for i, s in enumerate(audio_streams):
+        lang = _normalize_language_tag(s.get("language"), fallback="eng")
+        audio_metadata_args += [f"-metadata:s:a:{i}", f"language={lang}"]
 
     sub_args = []
+    sub_metadata_args = []
     if sub_idx is not None:
         map_args += ["-map", f"0:{sub_idx}"]
-        sub_args = ["-c:s", "copy", "-disposition:s:0", "default"]
+        sub_args = ["-c:s", "copy", "-disposition:s:0", "0"]
 
-    # Determine which audio stream becomes default.
+        selected_sub = next((s for s in sub_streams if s["index"] == sub_idx), None)
+        sub_lang = _normalize_language_tag(
+            selected_sub.get("language") if selected_sub else None,
+            fallback="eng",
+        )
+        sub_metadata_args = ["-metadata:s:s:0", f"language={sub_lang}"]
+
     default_audio_pos = 0
     if audio_idx is not None:
         for i, s in enumerate(audio_streams):
@@ -134,7 +150,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         "-hide_banner",
         "-nostdin",
         "-y",
-        # IMPORTANT: no decode-side hwaccel here; let profiles handle hwupload
         "-vaapi_device",
         "/dev/dri/renderD128",
         "-i",
@@ -145,7 +160,9 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         *profile["video_args"],
         "-c:a",
         "copy",
+        *audio_metadata_args,
         *sub_args,
+        *sub_metadata_args,
         f"-disposition:a:{default_audio_pos}",
         "default",
         "-max_muxing_queue_size",
@@ -172,13 +189,12 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
 
     return result
 
-
 def encode_extra(src, output_file, preset_name):
     """
     Extras encode — same function name, now ffmpeg-based.
     Currently just uses the BluRay/HD profile; preset_name kept for logging.
     """
-    from .ffmpeg_profiles import _bluray_profile  # local import to avoid cycles
+    from core.ffmpeg_profiles import _bluray_profile  # local import to avoid cycles
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
     profile = _bluray_profile()

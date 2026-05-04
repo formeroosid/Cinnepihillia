@@ -9,9 +9,9 @@ Thin wrapper that delegates to:
 import argparse
 from pathlib import Path
 
-from cinephillia.shared.logging_config import setup_logging
-from cinephillia.movies.movie_pipeline import process_movie
-from cinephillia.tv.tv_pipeline import process_tv_series
+from shared.logging_config import setup_logging
+from movies.movie_pipeline import process_movie
+from tv.tv_pipeline import process_tv_series
 
 
 def main():

@@ -2,13 +2,13 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from cinephillia.core.media_analyzer import detect_resolution
-from cinephillia.core.ffmpeg_profiles import select_preset
-from cinephillia.core.ffmpeg_runner import encode_with_profile
-from cinephillia.shared.file_ops import ensure_dir_permissions
-from cinephillia.tv.disc_parser import parse_tv_input
-from cinephillia.tv.episode_classifier import classify_titles
-from cinephillia.tv.inventory import (
+from core.media_analyzer import detect_resolution
+from core.ffmpeg_profiles import select_preset
+from core.ffmpeg_runner import encode_with_profile
+from shared.file_ops import ensure_dir_permissions
+from tv.disc_parser import parse_tv_input
+from tv.episode_classifier import classify_titles
+from tv.inventory import (
     inventory_report,
     print_inventory,
     print_sequential_inventory,

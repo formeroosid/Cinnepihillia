@@ -1,9 +1,9 @@
 import argparse
 from pathlib import Path
 
-from cinephillia.shared.logging_config import setup_logging
-from cinephillia.tv.tv_pipeline import process_tv_series
-from cinephillia.tv.inventory import inventory_report, print_inventory
+from shared.logging_config import setup_logging
+from tv.tv_pipeline import process_tv_series
+from tv.inventory import inventory_report, print_inventory
 
 
 def main():
@@ -50,8 +50,8 @@ def main():
         if args.plex_dir:
             report = inventory_report(args.series, plex_series_root=args.plex_dir)
         elif args.input:
-            from cinephillia.tv.disc_parser import parse_tv_input
-            from cinephillia.tv.episode_classifier import classify_titles
+            from tv.disc_parser import parse_tv_input
+            from tv.episode_classifier import classify_titles
             titles = parse_tv_input(args.input)
             episodes, _ = classify_titles(
                 titles, (args.duration_min, args.duration_max))

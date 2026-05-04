@@ -3,10 +3,10 @@ import re
 import sys
 import logging
 
-from cinephillia.core.media_analyzer import detect_resolution
-from cinephillia.core.ffmpeg_profiles import select_preset, EXTRAS_PRESET_NAME
-from cinephillia.core.ffmpeg_runner import encode_with_profile, encode_extra
-from cinephillia.shared.file_ops import ensure_dir_permissions
+from core.media_analyzer import detect_resolution
+from core.ffmpeg_profiles import select_preset, EXTRAS_PRESET_NAME
+from core.ffmpeg_runner import encode_with_profile, encode_extra
+from shared.file_ops import ensure_dir_permissions
 
 log = logging.getLogger(__name__)
 

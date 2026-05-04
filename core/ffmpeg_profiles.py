@@ -8,6 +8,7 @@ log = logging.getLogger(__name__)
 
 EXTRAS_PRESET_NAME = "extras_720p"  # used just as a label
 
+
 def select_preset(width, height):
     """
     Choose an ffmpeg profile based on resolution.
@@ -35,40 +36,45 @@ def _sd_profile():
     return {
         "name": "sd",
         "video_args": [
-            # Match the working CLI: system memory -> nv12 -> hwupload -> hevc_vaapi
+            # SD / DVD → 8‑bit encode
             "-vf", "format=nv12,hwupload",
             "-c:v", "hevc_vaapi",
             "-b:v", "5M",
-            # Optional: let VAAPI choose profile/level from the input,
-            # so we don't force something unsupported
-            # "-profile:v", "main",
+            # You can add: "-profile:v", "main",
         ],
     }
+
 
 def _bluray_profile():
     return {
         "name": "bluray",
         "video_args": [
-            "-vf", "scale_vaapi=format=p010",
+            # 1080p Blu‑ray: choose 8‑bit or 10‑bit depending on what you want.
+            # If you want 8‑bit HEVC:
+            "-vf", "format=nv12,hwupload",
             "-c:v", "hevc_vaapi",
             "-rc_mode", "CQP",
             "-qp", "22",
-            "-profile:v", "main10",
+            "-profile:v", "main",
+            # If you prefer 10‑bit here instead, change the two lines above to:
+            # "-vf", "format=p010,hwupload",
+            # "-profile:v", "main10",
         ],
     }
+
 
 def _uhd_profile():
     return {
         "name": "4k",
         "video_args": [
-            "-vf", "scale_vaapi=format=p010",
+            # 4K / UHD, 10‑bit Main10
+            "-vf", "format=p010,hwupload",
             "-c:v", "hevc_vaapi",
             "-rc_mode", "CQP",
             "-qp", "24",
             "-profile:v", "main10",
         ],
     }
-
 
 
 PROFILE_ALIASES = {
