@@ -33,8 +33,6 @@ Cinnephillia/
 └── ...
 ```
 
-Adjust this tree to match the actual repository layout once it settles. A short directory map is a common README best practice because it helps people navigate the repository quickly.[web:578][web:573]
-
 ## Requirements
 
 - Python 3.10+
@@ -52,8 +50,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
-
-If a `requirements.txt` file does not exist yet, add one as the dependency list becomes stable. Clear installation steps are one of the most important parts of an effective README.[web:569][web:573]
 
 ## Usage
 
@@ -75,7 +71,7 @@ If the real entry points differ, replace these examples with the exact commands 
 
 ## FFmpeg Notes
 
-This project is intended for media transcoding and related automation, and FFmpeg is a standard tool for Python-based transcoding workflows.[web:574][web:577] If hardware acceleration is used, document the expected device path, driver assumptions, and any codec limitations directly in this section once those details are finalized.
+This project is intended for media transcoding and related automation, and FFmpeg is a standard tool for Python-based transcoding workflows.
 
 Suggested additions for this section:
 
@@ -97,7 +93,7 @@ git commit -m "Describe the change"
 git push -u origin feature/my-change
 ```
 
-Then open a pull request on GitHub to merge into `master`. A README commonly includes at least a lightweight development and contribution path so that collaborators know how changes should flow through the project.[web:568][web:573]
+Then open a pull request on GitHub to merge into `master`.
 
 ## Roadmap
 
@@ -112,8 +108,4 @@ Potential next steps for Cinnephillia:
 
 ## Contributing
 
-Contributions should follow the existing project structure, keep modules focused, and avoid unnecessary debug output in committed code. Open an issue or pull request for significant changes, and include enough context for the change to be reviewed quickly.[web:568][web:573]
-
-## License
-
-Add a `LICENSE` file and name the license here once you decide how the project should be shared. GitHub recommends pairing a README with other standard repository documents such as a license and contribution guidance.[web:568]
+Contributions should follow the existing project structure, keep modules focused, and avoid unnecessary debug output in committed code. Open an issue or pull request for significant changes, and include enough context for the change to be reviewed quickly.
