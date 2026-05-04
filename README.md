@@ -4,7 +4,7 @@ Cinnephillia is a Python-based media processing and library-management project b
 
 ## Overview
 
-Cinnephillia focuses on local media workflows, including FFmpeg-driven transcoding, branch-based development, and a structure intended to grow into a maintainable application for home-theater media management. The sections below are written to give the repository a solid public-facing starting point and can be refined as commands, modules, and deployment steps stabilize.
+Cinnephillia focuses on local media workflows, including FFmpeg-driven transcoding, branch-based development, and a structure intended to grow into a maintainable application for home-theater media management.
 
 ## Features
 
