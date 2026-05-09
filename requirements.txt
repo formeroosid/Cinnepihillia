@@ -1,0 +1,3 @@
+# No pip-installed Python dependencies yet.
+# This project currently relies on the Python standard library
+# and system tools such as ffmpeg and ffprobe.
