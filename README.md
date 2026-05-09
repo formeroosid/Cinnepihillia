@@ -1,18 +1,18 @@
 # Cinnephillia
 
-Cinnephillia is a Python-based media workflow project for organizing, inspecting, and transcoding video files for a home theater library. A good README should explain what the project does, what it requires, and how to get started using instructions that match the repository's current state.[cite:571][cite:610][cite:573]
+Cinnephillia is a Python-based media workflow project for organizing, inspecting, and transcoding video files for a home theater library. A good README should explain what the project does, what it requires, and how to get started using instructions that match the repository's current state.
 
 ## Status
 
-This project is actively evolving. The repository structure, entry points, and dependency management may continue to change as the codebase is refactored and stabilized.[cite:610][cite:632]
+This project is actively evolving. The repository structure, entry points, and dependency management may continue to change as the codebase is refactored and stabilized.
 
 ## What it does
 
-Cinnephillia is intended to support local media-library workflows such as scanning media, applying FFmpeg-based transcode profiles, and organizing code into reusable modules instead of one-off scripts. A useful project README should focus on the purpose, setup, and usage of the project before diving into development details.[cite:573][cite:641]
+Cinnephillia is intended to support local media-library workflows such as scanning media, applying FFmpeg-based transcode profiles, and organizing code into reusable modules instead of one-off scripts. A useful project README should focus on the purpose, setup, and usage of the project before diving into development details.
 
 ## Current setup
 
-At the moment, the project should be documented based on what actually exists in the repository. Installation instructions should not claim that `requirements.txt` or another dependency file exists unless it is really present and maintained.[cite:610][cite:644]
+At the moment, the project should be documented based on what actually exists in the repository. Installation instructions should not claim that `requirements.txt` or another dependency file exists unless it is really present and maintained.
 
 ### Prerequisites
 
@@ -36,20 +36,20 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-This creates an isolated Python environment for the project. A virtual environment is separate from a `.env` file and separate from dependency files like `requirements.txt` or `pyproject.toml`.[cite:649][cite:573]
+This creates an isolated Python environment for the project. A virtual environment is separate from a `.env` file and separate from dependency files like `requirements.txt` or `pyproject.toml`.
 
 ### Install Python packages
 
-The repository does **not** currently document a finalized dependency file. Because of that, do not use `pip install -r requirements.txt` unless that file has been added to the project.[cite:610][cite:646]
+The repository does **not** currently document a finalized dependency file. Because of that, do not use `pip install -r requirements.txt` unless that file has been added to the project.
 
 Until dependency management is finalized, install the packages actually required by the modules or scripts you are running. Once the dependency list is stable, add either:
 
 - a `requirements.txt` file for pinned installs, or
-- a `pyproject.toml` file for modern Python project metadata and dependency management.[cite:599][cite:649]
+- a `pyproject.toml` file for modern Python project metadata and dependency management.
 
 ## Configuration
 
-If the project needs machine-specific settings such as library paths, output directories, or API keys, those can be stored in a `.env` file. A `.env` file is for runtime configuration values; it does **not** install Python dependencies.[cite:604][cite:599]
+If the project needs machine-specific settings such as library paths, output directories, or API keys, those can be stored in a `.env` file. A `.env` file is for runtime configuration values; it does **not** install Python dependencies.
 
 Example `.env`:
 
@@ -100,7 +100,7 @@ Directory maps help readers understand where to look next, especially in evolvin
 - Keep debug prints temporary and remove them once issues are resolved.
 - Avoid committing log files, local virtual environments, or IDE-specific project files.
 - Use feature branches and pull requests for larger changes.
-- Keep documentation aligned with the actual repository state.[cite:610][cite:632]
+- Keep documentation aligned with the actual repository state.
 
 Recommended `.gitignore` entries:
 
@@ -117,7 +117,7 @@ When the Python package list becomes stable, create one of the following and the
 
 ### Option A: `requirements.txt`
 
-If the project is mainly an application and you want a simple install path, generate and maintain a `requirements.txt` file.[cite:649][cite:646]
+If the project is mainly an application and you want a simple install path, generate and maintain a `requirements.txt` file.
 
 Example:
 
@@ -128,8 +128,8 @@ pip freeze > requirements.txt
 
 ### Option B: `pyproject.toml`
 
-If the project is moving toward a more modern Python structure, use `pyproject.toml` for metadata and dependency management.[cite:599][cite:635]
+If the project is moving toward a more modern Python structure, use `pyproject.toml` for metadata and dependency management.
 
 ## License
 
-Choose a license and add a `LICENSE` file at the repository root. READMEs are typically most useful when they clearly state setup, usage, and licensing terms in one place.[cite:610][cite:604]
+Choose a license and add a `LICENSE` file at the repository root. READMEs are typically most useful when they clearly state setup, usage, and licensing terms in one place.
