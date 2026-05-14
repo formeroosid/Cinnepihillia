@@ -2,10 +2,6 @@ import logging
 
 log = logging.getLogger(__name__)
 
-# These profiles are intentionally similar to your HandBrake presets,
-# but expressed in ffmpeg terms instead of JSON HandBrake presets.
-# You can tune qp, filters, etc. to taste.
-
 EXTRAS_PRESET_NAME = "extras_720p"  # used just as a label
 
 
@@ -14,6 +10,7 @@ def select_preset(width, height):
     Choose an ffmpeg profile based on resolution.
     Returns a dict with keys:
       - name: label
+      - input_args: list[str] for ffmpeg input-side options (optional)
       - video_args: list[str] for ffmpeg video options
     """
     if width is None or height is None:
@@ -35,44 +32,45 @@ def select_preset(width, height):
 def _sd_profile():
     return {
         "name": "sd",
+        "input_args": [
+            "-vaapi_device", "/dev/dri/renderD128",
+        ],
         "video_args": [
-            # SD / DVD → 8‑bit encode
             "-vf", "format=nv12,hwupload",
             "-c:v", "hevc_vaapi",
             "-b:v", "5M",
-            # You can add: "-profile:v", "main",
         ],
     }
-
 
 def _bluray_profile():
     return {
         "name": "bluray",
+        "input_args": [],
         "video_args": [
-            # 1080p Blu‑ray: choose 8‑bit or 10‑bit depending on what you want.
-            # If you want 8‑bit HEVC:
-            "-vf", "format=nv12,hwupload",
-            "-c:v", "hevc_vaapi",
-            "-rc_mode", "CQP",
-            "-qp", "22",
-            "-profile:v", "main",
-            # If you prefer 10‑bit here instead, change the two lines above to:
-            # "-vf", "format=p010,hwupload",
-            # "-profile:v", "main10",
+            "-c:v", "libx265",
+            "-pix_fmt", "yuv420p",
+            "-preset", "slow",
+            "-crf", "20",
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-colorspace", "bt709",
+            "-x265-params", "repeat-headers=1",
         ],
     }
-
 
 def _uhd_profile():
     return {
         "name": "4k",
+        "input_args": [],
         "video_args": [
-            # 4K / UHD, 10‑bit Main10
-            "-vf", "format=p010,hwupload",
-            "-c:v", "hevc_vaapi",
-            "-rc_mode", "CQP",
-            "-qp", "24",
-            "-profile:v", "main10",
+            "-c:v", "libx265",
+            "-pix_fmt", "yuv420p10le",
+            "-preset", "slow",
+            "-crf", "23",
+            "-color_primaries", "bt2020",
+            "-color_trc", "smpte2084",
+            "-colorspace", "bt2020nc",
+            "-x265-params", "hdr10=1:hdr10-opt=1:repeat-headers=1",
         ],
     }
 
@@ -88,7 +86,6 @@ PROFILE_ALIASES = {
 def get_preset_override(encode_profile):
     """Return profile dict for a CLI --encode override in future, if you add it."""
     key = PROFILE_ALIASES[encode_profile]
-    # Reuse the helpers:
     if key == "uhd":
         p = _uhd_profile()
     elif key == "sd_dvd":

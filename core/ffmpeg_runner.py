@@ -93,16 +93,12 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
     """
     Run ffmpeg with the given profile dict (from ffmpeg_profiles/select_preset).
 
-    - src: input MKV path
-    - output_file: output MKV path
-    - profile: dict containing at least:
-          {
-              "name": "bluray" | "4k" | "sd",
-              "video_args": [ ... ffmpeg video options ... ]
-          }
-      where video_args contains only output-side options (filters, codec, rc, qp, profile),
-      NOT hwaccel flags.
-    - copy_audio_only: kept for compatibility; always copy audio streams.
+    Expected profile shape:
+        {
+            "name": "bluray" | "4k" | "sd",
+            "video_args": [...],
+            "input_args": [...],   # optional, placed before -i
+        }
     """
     del copy_audio_only
 
@@ -118,12 +114,16 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
     audio_idx = _select_dtshd_like_audio(audio_streams)
     sub_idx = _select_first_english_sub(sub_streams)
 
-    map_args = ["-map", "0:v:0", "-map", "0:a"]
+    if audio_idx is None:
+        log.error(f"Could not determine audio stream to keep for {src}")
+        return subprocess.CompletedProcess(args=[], returncode=1)
 
-    audio_metadata_args = []
-    for i, s in enumerate(audio_streams):
-        lang = _normalize_language_tag(s.get("language"), fallback="eng")
-        audio_metadata_args += [f"-metadata:s:a:{i}", f"language={lang}"]
+    input_args = profile.get("input_args", [])
+
+    map_args = ["-map", "0:v:0", "-map", f"0:{audio_idx}"]
+
+    audio_metadata_args = ["-metadata:s:a:0", "language=eng"]
+    audio_disposition_args = ["-disposition:a:0", "default"]
 
     sub_args = []
     sub_metadata_args = []
@@ -138,33 +138,26 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         )
         sub_metadata_args = ["-metadata:s:s:0", f"language={sub_lang}"]
 
-    default_audio_pos = 0
-    if audio_idx is not None:
-        for i, s in enumerate(audio_streams):
-            if s["index"] == audio_idx:
-                default_audio_pos = i
-                break
-
     cmd = [
         "ffmpeg",
         "-hide_banner",
         "-nostdin",
         "-y",
-        "-vaapi_device",
-        "/dev/dri/renderD128",
+        *input_args,
         "-i",
         src,
         *map_args,
         "-map_metadata",
         "-1",
+        "-map_chapters",
+        "0",
         *profile["video_args"],
         "-c:a",
         "copy",
         *audio_metadata_args,
+        *audio_disposition_args,
         *sub_args,
         *sub_metadata_args,
-        f"-disposition:a:{default_audio_pos}",
-        "default",
         "-max_muxing_queue_size",
         "9999",
         output_file,
