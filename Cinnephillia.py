@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 formeroosid
+
 #!/usr/bin/env python3
 """
 Cinnephillia — Movie & TV processing entry point.

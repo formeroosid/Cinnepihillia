@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 formeroosid
+
 import os
 import re
 import sys

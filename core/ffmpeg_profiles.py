@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 formeroosid
+
 import logging
 
 log = logging.getLogger(__name__)

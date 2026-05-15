@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 formeroosid
+
 """
 Per-series configuration overrides.
 Duration ranges, FileBot hints, etc.

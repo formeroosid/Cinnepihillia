@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 formeroosid
+
 import re
 import logging
 from pathlib import Path

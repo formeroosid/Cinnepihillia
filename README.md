@@ -1,4 +1,4 @@
-# Cinnephillia
+    # Cinnephillia
 
 Cinnephillia is a Python-based media workflow project for organizing, inspecting, and transcoding video files for a home theater library. 
 
