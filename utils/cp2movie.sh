@@ -47,7 +47,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   PLEX_HOST="127.0.0.1"
   PLEX_PORT="32400"
   MOVIES_SECTION_ID="1"
-  PLEX_TOKEN="3GTu65q1m2Dz7tecsxds"
+  PLEX_TOKEN="<your_token>"
 
   echo "Triggering Plex Movies metadata refresh..."
   curl -sS \
