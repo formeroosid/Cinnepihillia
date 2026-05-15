@@ -54,7 +54,8 @@ def _bluray_profile():
             "-color_primaries", "bt709",
             "-color_trc", "bt709",
             "-colorspace", "bt709",
-            "-x265-params", "repeat-headers=1",
+            "-x265-params",
+            "repeat-headers=1:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited",
         ],
     }
 
