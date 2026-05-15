@@ -51,6 +51,7 @@ if [ "$DRY_RUN" -eq 0 ]; then
   PLEX_HOST="127.0.0.1"
   PLEX_PORT="32400"
   TV_SECTION_ID="2"
+  PLEX_TOKEN = <your_token>
 
   echo "Triggering Plex TV metadata refresh..."
   curl -sS \
