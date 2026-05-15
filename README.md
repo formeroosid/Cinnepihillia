@@ -1,6 +1,6 @@
 # Cinnephillia
 
-Cinnephillia is a Python-based media workflow project for organizing, inspecting, and transcoding video files for a home theater library. A good README should explain what the project does, what it requires, and how to get started using instructions that match the repository's current state.
+Cinnephillia is a Python-based media workflow project for organizing, inspecting, and transcoding video files for a home theater library. 
 
 ## Status
 
@@ -8,11 +8,11 @@ This project is actively evolving. The repository structure, entry points, and d
 
 ## What it does
 
-Cinnephillia is intended to support local media-library workflows such as scanning media, applying FFmpeg-based transcode profiles, and organizing code into reusable modules instead of one-off scripts. A useful project README should focus on the purpose, setup, and usage of the project before diving into development details.
+Cinnephillia is intended to support local media-library workflows such as scanning media, applying FFmpeg-based transcode profiles, and organizing code into reusable modules instead of one-off scripts.
 
 ## Current setup
 
-At the moment, the project should be documented based on what actually exists in the repository. Installation instructions should not claim that `requirements.txt` or another dependency file exists unless it is really present and maintained.
+At the moment, the project should be documented based on what actually exists in the repository.
 
 ### Prerequisites
 
