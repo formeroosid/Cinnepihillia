@@ -62,6 +62,11 @@ python3 Cinnephillia.py "/mnt/bigbrother/TV/Star Trek - Strange New Worlds{tvdb-
     --mode both --type tv \
     --series-name "Star Trek - Strange New Worlds"
 ```
+```bash
+# Preserve every audio track (commentary, alternate languages) losslessly
+python3 Cinnephillia.py "/mnt/bigbrother/Movies/Lincoln (2012)" \
+    --type movie --mode both --preserve-all-audio
+```
 
 `--mode` is one of `feature`, `extras`, or `both`. `--type` is `movie` or `tv`.
 
@@ -203,7 +208,7 @@ The `copy_plex_*` scripts are the portable, "stage anywhere" path; the `cp2*` sc
 ## Design choices worth knowing
 
 - **No metadata matching.** TV episodes are renamed sequentially across discs, in disc-then-title order. Variable runtimes, "play all" titles, and bonus features are not filtered out automatically. You review the `Plex Movie Files/Season XX/` folder by hand and rename or remove what you don't want.
-- **Single primary audio.** Commentary tracks and lossy DTS cores are dropped by default. The DTS-HD MA primary is copied losslessly. If you want to preserve commentary, modify the audio mapping in `core/ffmpeg_runner.py`.
+- **Single primary audio (default).** Commentary tracks and lossy DTS cores are dropped by default. The DTS-HD MA primary is copied losslessly. Pass `--preserve-all-audio` to keep every audio track instead — each is mapped, copied losslessly with `-c:a copy`, and tagged with its original language. Available in both movie and TV modes via `Cinnephillia.py` and `python3 -m tv.cli process`.
 - **Symlinks, not copies.** `Plex Movie Files/` contains symlinks into `process/staging/`. This keeps the Plex view tidy while the encoded files live exactly once on disk.
 - **Suffix-driven extras for movies.** Annotating MakeMKV rips with `--featurette`, `--deleted`, etc. is the contract that drives automatic Plex-folder placement. No config files, no GUI.
 - **Trailing underscore in episode filenames.** `<series> SXXEXX_.mkv` leaves an obvious place for hand annotation during review without breaking Plex matching.
