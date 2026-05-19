@@ -52,27 +52,9 @@ def _run_ffprobe_streams(src, stream_type):
         )
     return streams
 
-
-def _select_dtshd_like_audio(audio_streams):
-    """
-    Pick best audio stream with this priority:
-      1) DTS-HD MA in English
-      2) Any DTS in English
-      3) First audio stream
-    Returns index as string or None.
-    """
-    for s in audio_streams:
-        if s["codec_name"].startswith("dts") and "DTS-HD MA" in s.get("profile", ""):
-            if s["language"] in ("eng", "") or not s["language"]:
-                return s["index"]
-
-    for s in audio_streams:
-        if s["codec_name"].startswith("dts"):
-            if s["language"] in ("eng", "") or not s["language"]:
-                return s["index"]
-
+def _select_primary_audio(audio_streams):
+    """Per MakeMKV ordering, the first audio stream is the primary track."""
     return audio_streams[0]["index"] if audio_streams else None
-
 
 def _select_first_english_sub(sub_streams):
     """
@@ -126,7 +108,7 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
             len(audio_streams), src,
         )
     else:
-        audio_idx = _select_dtshd_like_audio(audio_streams)
+        audio_idx = _select_primary_audio(audio_streams)
         if audio_idx is None:
             log.error(f"Could not determine audio stream to keep for {src}")
             return subprocess.CompletedProcess(args=[], returncode=1)
