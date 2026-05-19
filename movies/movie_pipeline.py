@@ -34,22 +34,27 @@ def identify_main_feature(files):
     return max(files, key=lambda x: os.path.getsize(x)) if files else None
 
 
-def process_main_feature(src, out_dir, title, year, preset):
+def process_main_feature(src, out_dir, title, year, preset, preserve_all_audio=False):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
 
     # ffmpeg_runner will handle audio/sub detection & mapping.
     log.info(f"Encoding main feature: {src} → {output_file} using profile {preset['name']}")
-    encode_with_profile(src, output_file, preset)
+    encode_with_profile(src, output_file, preset, preserve_all_audio=preserve_all_audio)
 
-def process_extra(src, out_dir, base):
+def process_extra(src, out_dir, base, preserve_all_audio=False):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{base}.mkv")
-    encode_extra(src, output_file, EXTRAS_PRESET_NAME)
+    encode_extra(src, output_file, EXTRAS_PRESET_NAME, preserve_all_audio=preserve_all_audio)
 
 
-def process_movie(movie_root, mode="both"):
-    """Main entry point for movie processing."""
+def process_movie(movie_root, mode="both", preserve_all_audio=False):
+    """Main entry point for movie processing.
+
+    preserve_all_audio: when True, all audio tracks (including commentary)
+    are losslessly copied with their original language tags. Applies to
+    both the main feature and any extras processed in this run.
+    """
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
@@ -68,7 +73,11 @@ def process_movie(movie_root, mode="both"):
     if not full_paths:
         log.warning(f"No MKV files in: {rip_path}")
         return
-
+    if preserve_all_audio:
+        log.info(
+            "preserve-all-audio: enabled for movie '%s (%s)' — every audio "
+            "track will be copied", title, year or "????",
+        )
     main_feature = identify_main_feature(full_paths)
     extras = [f for f in full_paths if f != main_feature]
 
@@ -76,7 +85,8 @@ def process_movie(movie_root, mode="both"):
     if mode in ("feature", "both") and main_feature:
         width, height = detect_resolution(main_feature)
         preset = select_preset(width, height)
-        process_main_feature(main_feature, plex_root, title, year, preset)
+        process_main_feature(main_feature, plex_root, title, year, preset,
+                             preserve_all_audio=preserve_all_audio)
 
     # --- Extras ---
     if mode in ("extras", "both"):
@@ -90,9 +100,11 @@ def process_movie(movie_root, mode="both"):
                 if match:
                     trimmed_name = match.group(1).strip(" _-")
                     out_dir = os.path.join(plex_root, folder)
-                    process_extra(extra, out_dir, trimmed_name)
+                    process_extra(extra, out_dir, trimmed_name,
+                                  preserve_all_audio=preserve_all_audio)
                     assigned = True
                     break
             if not assigned:
                 out_dir = os.path.join(plex_root, "Other")
-                process_extra(extra, out_dir, extra_base)
+                process_extra(extra, out_dir, extra_base,
+                              preserve_all_audio=preserve_all_audio)
