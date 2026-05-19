@@ -23,6 +23,12 @@ def main():
     proc.add_argument("--duration-max", type=int, default=5400)
     proc.add_argument("--plex-host", default=None)
     proc.add_argument("--dry-run", action="store_true")
+    proc.add_argument(
+        "--preserve-all-audio",
+        action="store_true",
+        help="Map and losslessly copy every audio track (commentary, "
+             "alternate languages). Default: keep only the primary track.",
+    )
     proc.add_argument("--encode", choices=["4k", "bluray", "dvd", "sd"], default=None,
                       help="Override automatic profile detection (4k, bluray, dvd, sd)")
 
@@ -48,6 +54,7 @@ def main():
             plex_host=args.plex_host,
             encode_profile=args.encode,
             dry_run=args.dry_run,
+            preserve_all_audio=args.preserve_all_audio,
         )
     elif args.command == "inventory":
         if args.plex_dir:
