@@ -92,7 +92,7 @@ def _normalize_language_tag(lang, fallback="eng"):
     return lang
 
 
-def encode_with_profile(src, output_file, profile, copy_audio_only=True):
+def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
     """
     Run ffmpeg with the given profile dict (from ffmpeg_profiles/select_preset).
 
@@ -103,8 +103,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
             "input_args": [...],   # optional, placed before -i
         }
     """
-    del copy_audio_only
-
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     audio_streams = _run_ffprobe_streams(src, "a")
@@ -114,18 +112,26 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         log.error(f"No audio streams found in {src}")
         return subprocess.CompletedProcess(args=[], returncode=1)
 
-    audio_idx = _select_dtshd_like_audio(audio_streams)
     sub_idx = _select_first_english_sub(sub_streams)
-
-    if audio_idx is None:
-        log.error(f"Could not determine audio stream to keep for {src}")
-        return subprocess.CompletedProcess(args=[], returncode=1)
-
     input_args = profile.get("input_args", [])
-
-    map_args = ["-map", "0:v:0", "-map", f"0:{audio_idx}"]
-
-    audio_metadata_args = ["-metadata:s:a:0", "language=eng"]
+    map_args = ["-map", "0:v:0"]
+    audio_metadata_args = []
+    if preserve_all_audio:
+        for out_pos, s in enumerate(audio_streams):
+            map_args += ["-map", f"0:{s['index']}"]
+            lang = _normalize_language_tag(s.get("language"), fallback="eng")
+            audio_metadata_args += [f"-metadata:s:a:{out_pos}", f"language={lang}"]
+        log.info(
+            "preserve-all-audio: mapping %d audio track(s) for %s",
+            len(audio_streams), src,
+        )
+    else:
+        audio_idx = _select_dtshd_like_audio(audio_streams)
+        if audio_idx is None:
+            log.error(f"Could not determine audio stream to keep for {src}")
+            return subprocess.CompletedProcess(args=[], returncode=1)
+        map_args += ["-map", f"0:{audio_idx}"]
+        audio_metadata_args = ["-metadata:s:a:0", "language=eng"]
     audio_disposition_args = ["-disposition:a:0", "default"]
 
     sub_args = []
@@ -185,7 +191,7 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
 
     return result
 
-def encode_extra(src, output_file, preset_name):
+def encode_extra(src, output_file, preset_name, preserve_all_audio=False):
     """
     Extras encode — same function name, now ffmpeg-based.
     Currently just uses the BluRay/HD profile; preset_name kept for logging.
@@ -194,4 +200,4 @@ def encode_extra(src, output_file, preset_name):
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
     profile = _bluray_profile()
-    return encode_with_profile(src, output_file, profile)
+    return encode_with_profile(src, output_file, profile, preserve_all_audio=preserve_all_audio)
