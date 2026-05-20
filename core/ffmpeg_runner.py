@@ -101,10 +101,23 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
     if preserve_all_audio:
         for out_pos, s in enumerate(audio_streams):
             map_args += ["-map", f"0:{s['index']}"]
-            lang = _normalize_language_tag(s.get("language"), fallback="eng")
-            audio_metadata_args += [f"-metadata:s:a:{out_pos}", f"language={lang}"]
+
+            # Copy per-stream metadata (title, language, etc.) from the
+            # corresponding source audio stream so MakeMKV-supplied titles
+            # like "Director Commentary" survive into the Plex library.
+            audio_metadata_args += [
+                f"-map_metadata:s:a:{out_pos}", f"0:s:a:{s['index']}",
+            ]
+
+            # Force language=eng only when the source tag is missing or und;
+            # otherwise the source language tag (already copied above) wins.
+            src_lang = s.get("language", "")
+            if not src_lang or src_lang.lower() in {"und", "unknown", "unk", ""}:
+                audio_metadata_args += [
+                    f"-metadata:s:a:{out_pos}", "language=eng",
+                ]
         log.info(
-            "preserve-all-audio: mapping %d audio track(s) for %s",
+            "preserve-all-audio: mapping %d audio tracks for %s",
             len(audio_streams), src,
         )
     else:
@@ -132,6 +145,7 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
             audio_metadata_args += ["-metadata:s:a:0", "language=eng"]
 
     audio_disposition_args = ["-disposition:a:0", "default"]
+    video_disposition_args = ["-disposition:v:0", "default"]
 
     sub_args = []
     sub_metadata_args = []
@@ -160,6 +174,7 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
         "-map_chapters",
         "0",
         *profile["video_args"],
+        *video_disposition_args,
         "-c:a",
         "copy",
         *audio_metadata_args,
