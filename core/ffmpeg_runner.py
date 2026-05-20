@@ -112,8 +112,25 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
         if audio_idx is None:
             log.error(f"Could not determine audio stream to keep for {src}")
             return subprocess.CompletedProcess(args=[], returncode=1)
-        map_args += ["-map", f"0:{audio_idx}"]
-        audio_metadata_args = ["-metadata:s:a:0", "language=eng"]
+        map_args += ["-map", f"0:a:{audio_idx}"]
+
+        # Preserve per-stream audio metadata (title, language) from the
+        # MakeMKV source so labels like "Surround 5.1" / "Director Commentary"
+        # survive into the Plex library. Global metadata is still stripped
+        # via -map_metadata -1; this re-attaches per-stream tags for the
+        # kept audio track only.
+        audio_metadata_args = ["-map_metadata:s:a:0", f"0:s:a:{audio_idx}"]
+
+        # Fall back to language=eng only when the source tag is missing or und.
+        selected_audio = next(
+            (s for s in audio_streams
+             if str(s.get("index")) == str(audio_idx)),
+            None,
+        )
+        src_lang = (selected_audio or {}).get("language", "")
+        if not src_lang or src_lang.lower() in {"und", "unknown", "unk", ""}:
+            audio_metadata_args += ["-metadata:s:a:0", "language=eng"]
+
     audio_disposition_args = ["-disposition:a:0", "default"]
 
     sub_args = []
