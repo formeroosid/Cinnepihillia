@@ -105,8 +105,11 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
             # Copy per-stream metadata (title, language, etc.) from the
             # corresponding source audio stream so MakeMKV-supplied titles
             # like "Director Commentary" survive into the Plex library.
+            # Both sides use audio-relative indexing: out_pos for the output,
+            # and out_pos for the input because we map audio streams in source
+            # order (audio-0 → audio-0, audio-1 → audio-1, etc.).
             audio_metadata_args += [
-                f"-map_metadata:s:a:{out_pos}", f"0:s:a:{s['index']}",
+                f"-map_metadata:s:a:{out_pos}", f"0:s:a:{out_pos}",
             ]
 
             # Force language=eng only when the source tag is missing or und;
@@ -132,7 +135,16 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
         # survive into the Plex library. Global metadata is still stripped
         # via -map_metadata -1; this re-attaches per-stream tags for the
         # kept audio track only.
-        audio_metadata_args = ["-map_metadata:s:a:0", f"0:s:a:{audio_idx}"]
+        # Find audio-relative position of the selected stream so the
+        # metadata copy uses the right index space (0:s:a:N is audio-relative).
+        audio_rel_pos = next(
+            (i for i, s in enumerate(audio_streams)
+             if str(s.get("index")) == str(audio_idx)),
+            0,
+        )
+        audio_metadata_args = [
+            "-map_metadata:s:a:0", f"0:s:a:{audio_rel_pos}",
+        ]
 
         # Fall back to language=eng only when the source tag is missing or und.
         selected_audio = next(
