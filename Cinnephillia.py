@@ -39,6 +39,12 @@ def main():
         "--series-name",
         help="Optional override for TV series name (defaults to folder name).",
     )
+    parser.add_argument(
+        "--preserve-all-audio",
+        action="store_true",
+        help="Map and losslessly copy every audio track (commentary, "
+             "alternate languages). Default: keep only the primary track.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -46,7 +52,8 @@ def main():
     root = Path(args.path)
 
     if args.type == "movie":
-        process_movie(str(root), args.mode)
+        process_movie(str(root), args.mode,
+                      preserve_all_audio=args.preserve_all_audio)
         return
 
     series_name = args.series_name or root.name
@@ -66,6 +73,7 @@ def main():
         dry_run=False,
         expected_counts=None,
         use_metadata_rename=False,
+        preserve_all_audio=args.preserve_all_audio,
     )
 
 

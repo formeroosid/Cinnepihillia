@@ -73,6 +73,7 @@ def process_tv_series(
     staging_dir,
     output_root,
     series_name,
+    preserve_all_audio=False,
     duration_min=None,
     duration_max=None,
     plex_host=None,
@@ -99,7 +100,11 @@ def process_tv_series(
         ripped_episodes=episodes,
     )
     print_sequential_inventory(pre_report, heading="TV RIP TALLY")
-
+    if preserve_all_audio:
+        log.info(
+            "preserve-all-audio: enabled — every audio track will be copied "
+            "for all episodes in series '%s'", series_name,
+        )
     if dry_run:
         return pre_report
 
@@ -126,7 +131,12 @@ def process_tv_series(
                 output_file,
                 profile.get("name", "<unknown>"),
             )
-            encode_with_profile(str(src), str(output_file), profile)
+            encode_with_profile(
+                str(src),
+                str(output_file),
+                profile,
+                preserve_all_audio=preserve_all_audio,
+            )
 
         ep_copy = dict(ep)
         ep_copy["encoded_path"] = str(output_file)

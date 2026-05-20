@@ -52,27 +52,9 @@ def _run_ffprobe_streams(src, stream_type):
         )
     return streams
 
-
-def _select_dtshd_like_audio(audio_streams):
-    """
-    Pick best audio stream with this priority:
-      1) DTS-HD MA in English
-      2) Any DTS in English
-      3) First audio stream
-    Returns index as string or None.
-    """
-    for s in audio_streams:
-        if s["codec_name"].startswith("dts") and "DTS-HD MA" in s.get("profile", ""):
-            if s["language"] in ("eng", "") or not s["language"]:
-                return s["index"]
-
-    for s in audio_streams:
-        if s["codec_name"].startswith("dts"):
-            if s["language"] in ("eng", "") or not s["language"]:
-                return s["index"]
-
+def _select_primary_audio(audio_streams):
+    """Per MakeMKV ordering, the first audio stream is the primary track."""
     return audio_streams[0]["index"] if audio_streams else None
-
 
 def _select_first_english_sub(sub_streams):
     """
@@ -92,7 +74,7 @@ def _normalize_language_tag(lang, fallback="eng"):
     return lang
 
 
-def encode_with_profile(src, output_file, profile, copy_audio_only=True):
+def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
     """
     Run ffmpeg with the given profile dict (from ffmpeg_profiles/select_preset).
 
@@ -103,8 +85,6 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
             "input_args": [...],   # optional, placed before -i
         }
     """
-    del copy_audio_only
-
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     audio_streams = _run_ffprobe_streams(src, "a")
@@ -114,19 +94,58 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         log.error(f"No audio streams found in {src}")
         return subprocess.CompletedProcess(args=[], returncode=1)
 
-    audio_idx = _select_dtshd_like_audio(audio_streams)
     sub_idx = _select_first_english_sub(sub_streams)
-
-    if audio_idx is None:
-        log.error(f"Could not determine audio stream to keep for {src}")
-        return subprocess.CompletedProcess(args=[], returncode=1)
-
     input_args = profile.get("input_args", [])
+    map_args = ["-map", "0:v:0"]
+    audio_metadata_args = []
+    if preserve_all_audio:
+        for out_pos, s in enumerate(audio_streams):
+            map_args += ["-map", f"0:{s['index']}"]
 
-    map_args = ["-map", "0:v:0", "-map", f"0:{audio_idx}"]
+            # Copy per-stream metadata (title, language, etc.) from the
+            # corresponding source audio stream so MakeMKV-supplied titles
+            # like "Director Commentary" survive into the Plex library.
+            audio_metadata_args += [
+                f"-map_metadata:s:a:{out_pos}", f"0:s:a:{s['index']}",
+            ]
 
-    audio_metadata_args = ["-metadata:s:a:0", "language=eng"]
+            # Force language=eng only when the source tag is missing or und;
+            # otherwise the source language tag (already copied above) wins.
+            src_lang = s.get("language", "")
+            if not src_lang or src_lang.lower() in {"und", "unknown", "unk", ""}:
+                audio_metadata_args += [
+                    f"-metadata:s:a:{out_pos}", "language=eng",
+                ]
+        log.info(
+            "preserve-all-audio: mapping %d audio tracks for %s",
+            len(audio_streams), src,
+        )
+    else:
+        audio_idx = _select_primary_audio(audio_streams)
+        if audio_idx is None:
+            log.error(f"Could not determine audio stream to keep for {src}")
+            return subprocess.CompletedProcess(args=[], returncode=1)
+        map_args += ["-map", f"0:a:{audio_idx}"]
+
+        # Preserve per-stream audio metadata (title, language) from the
+        # MakeMKV source so labels like "Surround 5.1" / "Director Commentary"
+        # survive into the Plex library. Global metadata is still stripped
+        # via -map_metadata -1; this re-attaches per-stream tags for the
+        # kept audio track only.
+        audio_metadata_args = ["-map_metadata:s:a:0", f"0:s:a:{audio_idx}"]
+
+        # Fall back to language=eng only when the source tag is missing or und.
+        selected_audio = next(
+            (s for s in audio_streams
+             if str(s.get("index")) == str(audio_idx)),
+            None,
+        )
+        src_lang = (selected_audio or {}).get("language", "")
+        if not src_lang or src_lang.lower() in {"und", "unknown", "unk", ""}:
+            audio_metadata_args += ["-metadata:s:a:0", "language=eng"]
+
     audio_disposition_args = ["-disposition:a:0", "default"]
+    video_disposition_args = ["-disposition:v:0", "default"]
 
     sub_args = []
     sub_metadata_args = []
@@ -155,6 +174,7 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
         "-map_chapters",
         "0",
         *profile["video_args"],
+        *video_disposition_args,
         "-c:a",
         "copy",
         *audio_metadata_args,
@@ -185,7 +205,7 @@ def encode_with_profile(src, output_file, profile, copy_audio_only=True):
 
     return result
 
-def encode_extra(src, output_file, preset_name):
+def encode_extra(src, output_file, preset_name, preserve_all_audio=False):
     """
     Extras encode — same function name, now ffmpeg-based.
     Currently just uses the BluRay/HD profile; preset_name kept for logging.
@@ -194,4 +214,4 @@ def encode_extra(src, output_file, preset_name):
 
     log.info(f"Encoding extra with preset '{preset_name}' (mapped to BluRay profile).")
     profile = _bluray_profile()
-    return encode_with_profile(src, output_file, profile)
+    return encode_with_profile(src, output_file, profile, preserve_all_audio=preserve_all_audio)
