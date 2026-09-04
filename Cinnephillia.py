@@ -45,6 +45,22 @@ def main():
         help="Map and losslessly copy every audio track (commentary, "
              "alternate languages). Default: keep only the primary track.",
     )
+    parser.add_argument(
+        "--dolby-vision",
+        choices=["auto", "off", "p81", "p76"],
+        default="auto",
+        help="Dolby Vision handling for UHD sources. 'auto' (default) "
+             "preserves DV as Profile 8.1 when the source has a DV RPU and "
+             "dovi_tool is available; otherwise falls through to HDR10. "
+             "'off' skips DV entirely. 'p81'/'p76' force preservation and "
+             "error out if the source has no DV or dovi_tool is missing. "
+             "Only affects the UHD profile.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Log every ffmpeg / dovi_tool command without executing it.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -53,7 +69,9 @@ def main():
 
     if args.type == "movie":
         process_movie(str(root), args.mode,
-                      preserve_all_audio=args.preserve_all_audio)
+                      preserve_all_audio=args.preserve_all_audio,
+                      dolby_vision=args.dolby_vision,
+                      dry_run=args.dry_run)
         return
 
     series_name = args.series_name or root.name
@@ -70,7 +88,7 @@ def main():
         duration_max=None,
         plex_host=None,
         encode_profile=None,
-        dry_run=False,
+        dry_run=args.dry_run,
         expected_counts=None,
         use_metadata_rename=False,
         preserve_all_audio=args.preserve_all_audio,
