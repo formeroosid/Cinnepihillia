@@ -53,8 +53,18 @@ def _run_ffprobe_streams(src, stream_type):
     return streams
 
 def _select_primary_audio(audio_streams):
-    """Per MakeMKV ordering, the first audio stream is the primary track."""
-    return audio_streams[0]["index"] if audio_streams else None
+    """
+    Per MakeMKV ordering, the first audio stream in ffprobe order is the
+    primary track.
+
+    Returns the audio-relative position (0 for the first audio track),
+    suitable for use with ffmpeg's ``0:a:<N>`` selector. Previously this
+    returned ffprobe's ``stream=index`` (the absolute container index),
+    which the caller then passed to ``0:a:<idx>`` — causing MakeMKV rips
+    whose primary audio sat at container index 1 (video at 0) to select
+    the *second* audio track instead of the first.
+    """
+    return 0 if audio_streams else None
 
 def _select_first_english_sub(sub_streams):
     """
@@ -124,35 +134,28 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
             len(audio_streams), src,
         )
     else:
-        audio_idx = _select_primary_audio(audio_streams)
-        if audio_idx is None:
+        audio_rel_pos = _select_primary_audio(audio_streams)
+        if audio_rel_pos is None:
             log.error(f"Could not determine audio stream to keep for {src}")
             return subprocess.CompletedProcess(args=[], returncode=1)
-        map_args += ["-map", f"0:a:{audio_idx}"]
+        # audio_rel_pos is audio-relative (0 = first audio track); use the
+        # matching audio-relative selector so we can never accidentally map
+        # a subtitle or a later audio track by feeding an absolute container
+        # index into an audio-relative slot.
+        map_args += ["-map", f"0:a:{audio_rel_pos}"]
 
         # Preserve per-stream audio metadata (title, language) from the
         # MakeMKV source so labels like "Surround 5.1" / "Director Commentary"
         # survive into the Plex library. Global metadata is still stripped
         # via -map_metadata -1; this re-attaches per-stream tags for the
         # kept audio track only.
-        # Find audio-relative position of the selected stream so the
-        # metadata copy uses the right index space (0:s:a:N is audio-relative).
-        audio_rel_pos = next(
-            (i for i, s in enumerate(audio_streams)
-             if str(s.get("index")) == str(audio_idx)),
-            0,
-        )
         audio_metadata_args = [
             "-map_metadata:s:a:0", f"0:s:a:{audio_rel_pos}",
         ]
 
         # Fall back to language=eng only when the source tag is missing or und.
-        selected_audio = next(
-            (s for s in audio_streams
-             if str(s.get("index")) == str(audio_idx)),
-            None,
-        )
-        src_lang = (selected_audio or {}).get("language", "")
+        selected_audio = audio_streams[audio_rel_pos]
+        src_lang = selected_audio.get("language", "")
         if not src_lang or src_lang.lower() in {"und", "unknown", "unk", ""}:
             audio_metadata_args += ["-metadata:s:a:0", "language=eng"]
 
@@ -185,6 +188,14 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False):
         "-1",
         "-map_chapters",
         "0",
+        # -map_metadata -1 strips the global metadata dictionary, which on
+        # MakeMKV rips also contains per-chapter title tags. Re-attach the
+        # chapter title metadata so Plex shows "Chapter 01".."Chapter NN"
+        # instead of raw timestamps in place of names.
+        "-map_metadata:c",
+        "0:c",
+        "-map_metadata:g:c",
+        "0:g:c",
         *profile["video_args"],
         *video_disposition_args,
         "-c:a",
