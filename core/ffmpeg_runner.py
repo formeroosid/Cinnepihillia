@@ -296,16 +296,14 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         *map_args,
         "-map_metadata",
         "-1",
+        # -map_chapters 0 copies the chapter list including each chapter's
+        # metadata dictionary (where per-chapter titles live). -map_metadata
+        # -1 only strips *global* metadata; it does not touch chapter
+        # metadata. Do NOT add -map_metadata:c ... here: ffmpeg parses the
+        # ':c' specifier as "chapter N of output", not "chapters stream",
+        # and errors out with "Invalid chapter index 0" at output open.
         "-map_chapters",
         "0",
-        # -map_metadata -1 strips the global metadata dictionary, which on
-        # MakeMKV rips also contains per-chapter title tags. Re-attach the
-        # chapter title metadata so Plex shows "Chapter 01".."Chapter NN"
-        # instead of raw timestamps in place of names.
-        "-map_metadata:c",
-        "0:c",
-        "-map_metadata:g:c",
-        "0:g:c",
         *_merge_x265_params(
             profile["video_args"],
             x265_params_for_rpu(dv_rpu_path, dv_plan["target_profile"])
