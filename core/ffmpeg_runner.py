@@ -298,6 +298,14 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         "-1",
         "-map_chapters",
         "0",
+        # -map_metadata -1 strips the global metadata dictionary, which on
+        # MakeMKV rips also contains per-chapter title tags. Re-attach the
+        # chapter title metadata so Plex shows "Chapter 01".."Chapter NN"
+        # instead of raw timestamps in place of names.
+        "-map_metadata:c",
+        "0:c",
+        "-map_metadata:g:c",
+        "0:g:c",
         *_merge_x265_params(
             profile["video_args"],
             x265_params_for_rpu(dv_rpu_path, dv_plan["target_profile"])
