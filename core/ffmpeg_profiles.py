@@ -63,6 +63,11 @@ def _bluray_profile():
     }
 
 def _uhd_profile():
+    # HDR10 static metadata is always signaled here. Dolby Vision RPU
+    # preservation is layered on top by ``core.ffmpeg_runner`` when the
+    # source carries DV and ``--dolby-vision`` is not ``off``; that path
+    # appends ``dolby-vision-rpu`` and ``dolby-vision-profile`` to the
+    # x265-params string below.
     return {
         "name": "4k",
         "input_args": [],
