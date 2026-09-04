@@ -25,7 +25,7 @@ Cinnephillia uses software `libx265` for Blu-ray and UHD because, on real-world 
 |---|---|---|---|---|---|
 | `sd` | DVD / SD broadcast | `hevc_vaapi` | `nv12` | `-b:v 5M` | n/a |
 | `bluray` | 1080p Blu-ray | `libx265` | `yuv420p` | `-crf 20`, `preset slow` | BT.709 limited range |
-| `4k` (UHD) | 2160p HDR10 Blu-ray | `libx265` | `yuv420p10le` | `-crf 23`, `preset slow` | BT.2020 / SMPTE ST 2084 / HDR10 |
+| `4k` (UHD) | 2160p HDR10 / DV Blu-ray | `libx265` | `yuv420p10le` | `-crf 23`, `preset slow` | BT.2020 / SMPTE ST 2084 / HDR10 (+ optional Dolby Vision P8.1) |
 
 Profile selection is automatic based on detected video resolution. A single audio track is selected with this priority: English DTS-HD MA → any DTS English → first audio. The first English PGS subtitle is included if present. Chapters are always preserved.
 
@@ -34,6 +34,7 @@ Profile selection is automatic based on detected video resolution. A single audi
 - Python 3.10+
 - A modern ffmpeg build with `libx265`, `hevc_vaapi`, and `hevc_vulkan` enabled. The author runs a custom ffmpeg 8.1 build under `/usr/local`.
 - `ffprobe` available on `PATH`
+- (Optional, for Dolby Vision preservation on UHD sources) [`dovi_tool`](https://github.com/quietvoid/dovi_tool) on `PATH`. When absent, UHD encodes fall back to HDR10-only.
 - A VAAPI-capable GPU node at `/dev/dri/renderD128` for the SD profile
 - MakeMKV for ripping discs to MKV
 
@@ -67,8 +68,18 @@ python3 Cinnephillia.py "/mnt/bigbrother/TV/Star Trek - Strange New Worlds{tvdb-
 python3 Cinnephillia.py "/mnt/bigbrother/Movies/Lincoln (2012)" \
     --type movie --mode both --preserve-all-audio
 ```
+```bash
+# UHD source with Dolby Vision, force P8.1 preservation and error out
+# if dovi_tool is missing or the source has no DV RPU
+python3 Cinnephillia.py "/mnt/bigbrother/Movies/The Matrix (1999)" \
+    --type movie --mode feature --dolby-vision p81
 
-`--mode` is one of `feature`, `extras`, or `both`. `--type` is `movie` or `tv`.
+# Preview the ffmpeg / dovi_tool commands without executing anything
+python3 Cinnephillia.py "/mnt/bigbrother/Movies/The Matrix (1999)" \
+    --type movie --mode feature --dry-run
+```
+
+`--mode` is one of `feature`, `extras`, or `both`. `--type` is `movie` or `tv`. `--dolby-vision` is one of `auto` (default), `off`, `p81`, `p76`; only the UHD profile is affected. `--dry-run` logs every command without executing.
 
 ## Movie extras workflow
 

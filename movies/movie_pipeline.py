@@ -34,26 +34,43 @@ def identify_main_feature(files):
     return max(files, key=lambda x: os.path.getsize(x)) if files else None
 
 
-def process_main_feature(src, out_dir, title, year, preset, preserve_all_audio=False):
+def process_main_feature(src, out_dir, title, year, preset,
+                         preserve_all_audio=False,
+                         dolby_vision="auto", dry_run=False):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
 
     # ffmpeg_runner will handle audio/sub detection & mapping.
     log.info(f"Encoding main feature: {src} → {output_file} using profile {preset['name']}")
-    encode_with_profile(src, output_file, preset, preserve_all_audio=preserve_all_audio)
+    encode_with_profile(src, output_file, preset,
+                        preserve_all_audio=preserve_all_audio,
+                        dolby_vision=dolby_vision,
+                        dry_run=dry_run)
 
-def process_extra(src, out_dir, base, preserve_all_audio=False):
+def process_extra(src, out_dir, base,
+                  preserve_all_audio=False,
+                  dolby_vision="auto", dry_run=False):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{base}.mkv")
-    encode_extra(src, output_file, EXTRAS_PRESET_NAME, preserve_all_audio=preserve_all_audio)
+    encode_extra(src, output_file, EXTRAS_PRESET_NAME,
+                 preserve_all_audio=preserve_all_audio,
+                 dolby_vision=dolby_vision,
+                 dry_run=dry_run)
 
 
-def process_movie(movie_root, mode="both", preserve_all_audio=False):
+def process_movie(movie_root, mode="both", preserve_all_audio=False,
+                  dolby_vision="auto", dry_run=False):
     """Main entry point for movie processing.
 
     preserve_all_audio: when True, all audio tracks (including commentary)
     are losslessly copied with their original language tags. Applies to
     both the main feature and any extras processed in this run.
+
+    dolby_vision: one of 'auto', 'off', 'p81', 'p76'. See CLI --help.
+    Only affects the UHD profile.
+
+    dry_run: when True, log every ffmpeg/dovi_tool invocation without
+    running it.
     """
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
@@ -86,7 +103,9 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False):
         width, height = detect_resolution(main_feature)
         preset = select_preset(width, height)
         process_main_feature(main_feature, plex_root, title, year, preset,
-                             preserve_all_audio=preserve_all_audio)
+                             preserve_all_audio=preserve_all_audio,
+                             dolby_vision=dolby_vision,
+                             dry_run=dry_run)
 
     # --- Extras ---
     if mode in ("extras", "both"):
@@ -101,10 +120,14 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False):
                     trimmed_name = match.group(1).strip(" _-")
                     out_dir = os.path.join(plex_root, folder)
                     process_extra(extra, out_dir, trimmed_name,
-                                  preserve_all_audio=preserve_all_audio)
+                                  preserve_all_audio=preserve_all_audio,
+                                  dolby_vision=dolby_vision,
+                                  dry_run=dry_run)
                     assigned = True
                     break
             if not assigned:
                 out_dir = os.path.join(plex_root, "Other")
                 process_extra(extra, out_dir, extra_base,
-                              preserve_all_audio=preserve_all_audio)
+                              preserve_all_audio=preserve_all_audio,
+                              dolby_vision=dolby_vision,
+                              dry_run=dry_run)
