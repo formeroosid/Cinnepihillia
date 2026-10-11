@@ -34,7 +34,21 @@ Profile selection is automatic based on detected video resolution. A single audi
 - Python 3.10+
 - A modern ffmpeg build with `libx265`, `hevc_vaapi`, and `hevc_vulkan` enabled. The author runs a custom ffmpeg 8.1 build under `/usr/local`.
 - `ffprobe` available on `PATH`
-- (Optional, for Dolby Vision preservation on UHD sources) [`dovi_tool`](https://github.com/quietvoid/dovi_tool) on `PATH`. When absent, UHD encodes fall back to HDR10-only.
+- (Optional, for Dolby Vision preservation on UHD sources) [`dovi_tool`](https://github.com/quietvoid/dovi_tool) and `mkvmerge` ([MKVToolNix](https://mkvtoolnix.download/)) on `PATH`. When either is absent, `--dolby-vision auto` falls back to HDR10-only with a warning; `p81`/`p76` fail instead.
+
+### How Dolby Vision is preserved
+
+libx265 cannot take a Dolby Vision RPU through ffmpeg: `-x265-params dolby-vision-rpu=...` is an x265 CLI-only option, and ffmpeg logs `Unknown option: dolby-vision-rpu` and encodes plain HDR10. Cinnephillia therefore adds Dolby Vision after the encode:
+
+1. `dovi_tool -m 2 extract-rpu` pulls the source RPU and converts it to Profile 8.1 (dual-layer P7 sources lose their enhancement layer, as expected for 8.1).
+2. The film is encoded as normal HDR10 into a scratch directory (`.cinne-dv-*`) beside the output.
+3. RPU and encode frame counts are compared; a mismatch aborts.
+4. `dovi_tool inject-rpu` adds the RPU to the encoded HEVC, and `mkvmerge` remuxes it with the encode's audio, subtitles, and chapters.
+5. ffprobe must report Dolby Vision Profile 8 on the final file. On any failure the final file is removed and the scratch directory (HDR10 `encode_hdr10.mkv` and `rpu.bin`) is kept for inspection.
+
+Free space needed beside the output during a DV run is roughly 2x the final file plus one video-stream copy.
+
+Every encode also runs a one-frame encoder preflight with the real video arguments. Any `Unknown option`, `Invalid value`, or option-parsing error stops the job before the long encode starts.
 - A VAAPI-capable GPU node at `/dev/dri/renderD128` for the SD profile
 - MakeMKV for ripping discs to MKV
 

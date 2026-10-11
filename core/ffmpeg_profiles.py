@@ -63,11 +63,11 @@ def _bluray_profile():
     }
 
 def _uhd_profile():
-    # HDR10 static metadata is always signaled here. Dolby Vision RPU
-    # preservation is layered on top by ``core.ffmpeg_runner`` when the
-    # source carries DV and ``--dolby-vision`` is not ``off``; that path
-    # appends ``dolby-vision-rpu`` and ``dolby-vision-profile`` to the
-    # x265-params string below.
+    # HDR10 static metadata is always signaled here. Dolby Vision is added
+    # after the encode by ``core.dolby_vision.apply_dolby_vision`` (RPU
+    # injection with dovi_tool + mkvmerge remux). Do not add
+    # ``dolby-vision-rpu`` here: libx265 via ffmpeg rejects it as an
+    # unknown option, and the encoder preflight will now fail on it.
     return {
         "name": "4k",
         "input_args": [],
