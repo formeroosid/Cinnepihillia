@@ -4,12 +4,15 @@
 import os
 import subprocess
 import logging
+import re
 import shlex
+import shutil
 import tempfile
 
 from core.media_analyzer import detect_dolby_vision
 from core.dolby_vision import (
-    DolbyVisionError, dovi_tool_available, extract_rpu, x265_params_for_rpu,
+    DolbyVisionError, apply_dolby_vision, dovi_tool_available, extract_rpu,
+    mkvmerge_available,
 )
 
 log = logging.getLogger(__name__)
@@ -95,16 +98,16 @@ def _plan_dolby_vision(src, profile, dolby_vision):
     Decide whether to preserve DV for this encode.
 
     Returns a dict {'enabled': bool, 'target_profile': str|None,
-    'source_profile': int|None}. Callers use ``enabled`` to gate the
-    RPU extraction and x265-params injection.
+    'source_profile': int|None}. Callers use ``enabled`` to gate RPU
+    extraction and the post-encode inject/remux/verify step.
 
     Rules:
         - Only the UHD profile (name == '4k') ever preserves DV.
         - dolby_vision='off': always disabled.
-        - dolby_vision='auto': enabled iff source has DV and dovi_tool
-          is on PATH; otherwise silently disabled.
+        - dolby_vision='auto': enabled iff source has DV and both
+          dovi_tool and mkvmerge are on PATH; otherwise HDR10 with a warning.
         - dolby_vision='p81'/'p76': force enabled; raise if source has
-          no DV or dovi_tool is missing.
+          no DV or either tool is missing.
     """
     if dolby_vision == "off" or profile.get("name") != "4k":
         return {"enabled": False, "target_profile": None, "source_profile": None}
@@ -124,7 +127,15 @@ def _plan_dolby_vision(src, profile, dolby_vision):
                 src_profile,
             )
             return {"enabled": False, "target_profile": None, "source_profile": src_profile}
-        log.info("Dolby Vision: source has DV Profile %s; will re-inject as P8.1.", src_profile)
+        if not mkvmerge_available():
+            log.warning(
+                "Dolby Vision: source has DV Profile %s but mkvmerge is not "
+                "on PATH; falling back to HDR10-only. Install mkvtoolnix to "
+                "preserve DV, or pass --dolby-vision off to silence this.",
+                src_profile,
+            )
+            return {"enabled": False, "target_profile": None, "source_profile": src_profile}
+        log.info("Dolby Vision: source has DV Profile %s; will inject as P8.1 after encode.", src_profile)
         return {"enabled": True, "target_profile": "p81", "source_profile": src_profile}
 
     # Forced modes: p81 / p76
@@ -136,26 +147,49 @@ def _plan_dolby_vision(src, profile, dolby_vision):
         raise DolbyVisionError(
             f"--dolby-vision {dolby_vision} requested but dovi_tool is not on PATH"
         )
+    if not mkvmerge_available():
+        raise DolbyVisionError(
+            f"--dolby-vision {dolby_vision} requested but mkvmerge is not on PATH"
+        )
     log.info("Dolby Vision: forced %s; source DV Profile %s.", dolby_vision, src_profile)
     return {"enabled": True, "target_profile": dolby_vision, "source_profile": src_profile}
 
 
-def _merge_x265_params(video_args, extra):
-    """
-    Return a new video_args list with ``extra`` appended to the existing
-    ``-x265-params`` value (joining with ``:``). If no ``-x265-params``
-    flag is present, one is added.
+# ffmpeg/libx265 report bad x265 options as warnings and keep encoding,
+# so a typo or CLI-only option silently changes the output. Treat these as
+# fatal before committing to a multi-hour encode. Generic "x265 [error]"
+# lines are deliberately not matched: x265 emits advisory HDR10-opt
+# messages at that level that do not affect the encode.
+_PREFLIGHT_FATAL = re.compile(
+    r"Unknown option|Invalid value|Error parsing option|Error setting option",
+    re.IGNORECASE,
+)
 
-    Kept as a pure function so it can be unit-tested without ffmpeg.
+
+def _preflight_video_args(src, input_args, video_args, dry_run=False):
     """
-    if not extra:
-        return list(video_args)
-    out = list(video_args)
-    for i, arg in enumerate(out):
-        if arg == "-x265-params" and i + 1 < len(out):
-            out[i + 1] = f"{out[i + 1]}:{extra}" if out[i + 1] else extra
-            return out
-    return out + ["-x265-params", extra]
+    Encode one frame of ``src`` to the null muxer with the real video args.
+
+    Returns (ok: bool, findings: list[str]). Any non-zero exit or any
+    stderr line matching ``_PREFLIGHT_FATAL`` fails the preflight.
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "warning",
+        *input_args, "-i", src,
+        "-map", "0:v:0", "-frames:v", "1", "-an", "-sn",
+        *video_args, "-f", "null", "-",
+    ]
+    log.info(f"Preflight CMD: {' '.join(shlex.quote(c) for c in cmd)}")
+    if dry_run:
+        log.info("--dry-run: skipping encoder preflight")
+        return True, []
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    findings = [ln.strip() for ln in (proc.stderr or "").splitlines()
+                if _PREFLIGHT_FATAL.search(ln)]
+    if proc.returncode != 0 and not findings:
+        findings = [f"ffmpeg exited rc={proc.returncode}: "
+                    f"{(proc.stderr or '').strip()[-500:]}"]
+    return (proc.returncode == 0 and not findings), findings
 
 
 def _cleanup_dv_tmp(tmpdir):
@@ -201,12 +235,27 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
 
     sub_idx = _select_first_english_sub(sub_streams)
 
+    input_args = profile.get("input_args", [])
+
+    ok, findings = _preflight_video_args(src, input_args, profile["video_args"],
+                                         dry_run=dry_run)
+    if not ok:
+        for f in findings:
+            log.error("Encoder preflight: %s", f)
+        log.error("Encoder preflight failed for %s; not starting encode.", src)
+        return subprocess.CompletedProcess(args=[], returncode=1)
+
     dv_plan = _plan_dolby_vision(src, profile, dolby_vision)
     dv_rpu_path = None
     dv_tmpdir = None
+    encode_target = output_file
     if dv_plan["enabled"]:
-        dv_tmpdir = tempfile.mkdtemp(prefix="cinne-dv-")
+        # Scratch lives beside the output, not in /tmp: it holds a full
+        # HDR10 encode plus one HEVC elementary stream during injection.
+        out_dir = os.path.dirname(output_file) or "."
+        dv_tmpdir = tempfile.mkdtemp(prefix=".cinne-dv-", dir=out_dir)
         dv_rpu_path = os.path.join(dv_tmpdir, "rpu.bin")
+        encode_target = os.path.join(dv_tmpdir, "encode_hdr10.mkv")
         try:
             extract_rpu(src, dv_rpu_path,
                         target_profile=dv_plan["target_profile"],
@@ -214,8 +263,6 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         except DolbyVisionError:
             _cleanup_dv_tmp(dv_tmpdir)
             raise
-
-    input_args = profile.get("input_args", [])
     map_args = ["-map", "0:v:0"]
     audio_metadata_args = []
     if preserve_all_audio:
@@ -294,21 +341,23 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         "-i",
         src,
         *map_args,
-        "-map_metadata",
+        # Strip global metadata and video-stream tags (MakeMKV/mkvmerge
+        # statistics tags would be stale after a re-encode). Do NOT use a
+        # bare "-map_metadata -1": it also disables chapter metadata, so
+        # -map_chapters 0 copies chapter times but drops every chapter
+        # title (verified on ffmpeg 8.0). The ":g" form leaves chapter
+        # metadata on its default copy path. Stream tags are still manual
+        # because of ":s:v", so audio titles/languages are re-attached
+        # explicitly below. Do NOT add -map_metadata:c ...: ffmpeg parses
+        # ':c' as "chapter N of output" and fails with "Invalid chapter
+        # index 0" (PR #7 / #8).
+        "-map_metadata:g",
         "-1",
-        # -map_chapters 0 copies the chapter list including each chapter's
-        # metadata dictionary (where per-chapter titles live). -map_metadata
-        # -1 only strips *global* metadata; it does not touch chapter
-        # metadata. Do NOT add -map_metadata:c ... here: ffmpeg parses the
-        # ':c' specifier as "chapter N of output", not "chapters stream",
-        # and errors out with "Invalid chapter index 0" at output open.
+        "-map_metadata:s:v",
+        "-1",
         "-map_chapters",
         "0",
-        *_merge_x265_params(
-            profile["video_args"],
-            x265_params_for_rpu(dv_rpu_path, dv_plan["target_profile"])
-            if dv_plan["enabled"] and dv_rpu_path else None,
-        ),
+        *profile["video_args"],
         *video_disposition_args,
         "-c:a",
         "copy",
@@ -318,34 +367,53 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         *sub_metadata_args,
         "-max_muxing_queue_size",
         "9999",
-        output_file,
+        encode_target,
     ]
 
     log.info(f"FFmpeg CMD: {' '.join(shlex.quote(c) for c in cmd)}")
     if dry_run:
-        log.info("--dry-run: skipping ffmpeg execution for %s", output_file)
+        log.info("--dry-run: skipping ffmpeg execution for %s", encode_target)
+        if dv_plan["enabled"]:
+            apply_dolby_vision(encode_target, dv_rpu_path, output_file,
+                               dv_tmpdir, dry_run=True)
         _cleanup_dv_tmp(dv_tmpdir)
         return subprocess.CompletedProcess(args=cmd, returncode=0)
 
-    try:
-        result = subprocess.run(cmd, text=True)
-    finally:
-        _cleanup_dv_tmp(dv_tmpdir)
+    result = subprocess.run(cmd, text=True)
 
     if result.returncode != 0:
         log.error(f"Encode failed (rc={result.returncode}) for {src}")
-        if os.path.isfile(output_file):
-            os.remove(output_file)
-    elif not os.path.isfile(output_file):
-        log.error(f"Encode returned success but output file missing: {output_file}")
-    elif os.path.getsize(output_file) < 1024:
+        if os.path.isfile(encode_target):
+            os.remove(encode_target)
+        _cleanup_dv_tmp(dv_tmpdir)
+        return result
+    if not os.path.isfile(encode_target):
+        log.error(f"Encode returned success but output file missing: {encode_target}")
+        _cleanup_dv_tmp(dv_tmpdir)
+        return subprocess.CompletedProcess(args=cmd, returncode=1)
+    if os.path.getsize(encode_target) < 1024:
         log.error(
-            f"Suspiciously small output ({os.path.getsize(output_file)} bytes): {output_file}"
+            f"Suspiciously small output ({os.path.getsize(encode_target)} bytes): {encode_target}"
         )
-    else:
-        size_mb = os.path.getsize(output_file) / (1024 * 1024)
-        log.info(f"Encode succeeded: {output_file} ({size_mb:.1f} MB)")
+        _cleanup_dv_tmp(dv_tmpdir)
+        return subprocess.CompletedProcess(args=cmd, returncode=1)
 
+    if dv_plan["enabled"]:
+        try:
+            apply_dolby_vision(encode_target, dv_rpu_path, output_file, dv_tmpdir)
+        except DolbyVisionError as e:
+            log.error("Dolby Vision injection failed for %s: %s", src, e)
+            if os.path.isfile(output_file):
+                os.remove(output_file)
+            log.error(
+                "HDR10 encode and RPU kept for inspection in %s "
+                "(encode_hdr10.mkv, rpu.bin).", dv_tmpdir,
+            )
+            return subprocess.CompletedProcess(args=cmd, returncode=1)
+        _cleanup_dv_tmp(dv_tmpdir)
+
+    size_mb = os.path.getsize(output_file) / (1024 * 1024)
+    log.info(f"Encode succeeded: {output_file} ({size_mb:.1f} MB)")
     return result
 
 def encode_extra(src, output_file, preset_name, preserve_all_audio=False,

@@ -10,8 +10,18 @@ software x265 re-encode by:
 1. Extracting the DV RPU (dynamic per-scene metadata) from the source
    with ``dovi_tool``, optionally converting it to Profile 8.1 for
    broad player compatibility (Zidoo / Denon / Sony chain).
-2. Passing the extracted RPU to libx265 via ``dolby-vision-rpu=<path>``
-   and ``dolby-vision-profile=<n>`` in ``-x265-params``.
+2. Encoding the video as ordinary HDR10 with ffmpeg/libx265.
+3. Injecting the RPU into the finished HEVC bitstream with
+   ``dovi_tool inject-rpu`` and remuxing with ``mkvmerge``, which writes
+   the Matroska Dolby Vision configuration record.
+4. Verifying with ffprobe that the final file actually reports Dolby
+   Vision Profile 8.
+
+Why not ``-x265-params dolby-vision-rpu=...``: that option is handled by
+the standalone x265 CLI, not by ``x265_param_parse()``. Through ffmpeg's
+libx265 wrapper it is rejected with ``Unknown option: dolby-vision-rpu``
+as a warning only, so the encode "succeeds" as HDR10. That is what
+happened to the Matrix and Project Hail Mary acceptance encodes.
 
 Profile choices:
     - ``p81`` (default for ``auto``): P8.1, single-layer, HDR10-compatible.
@@ -25,8 +35,12 @@ Profile choices:
 
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
+
+from core.media_analyzer import detect_dolby_vision
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +52,11 @@ class DolbyVisionError(RuntimeError):
 def dovi_tool_available():
     """Return True if ``dovi_tool`` is on PATH."""
     return shutil.which("dovi_tool") is not None
+
+
+def mkvmerge_available():
+    """Return True if ``mkvmerge`` (MKVToolNix) is on PATH."""
+    return shutil.which("mkvmerge") is not None
 
 
 def extract_rpu(src, rpu_out, target_profile="p81", dry_run=False):
@@ -109,14 +128,129 @@ def extract_rpu(src, rpu_out, target_profile="p81", dry_run=False):
     return rpu_out
 
 
-def x265_params_for_rpu(rpu_path, profile="p81"):
-    """
-    Return the ``:``-joined x265-params fragment for DV re-injection.
+def _quote(cmd):
+    return " ".join(shlex.quote(str(c)) for c in cmd)
 
-    Callers should append this to the existing ``-x265-params`` string
-    already emitted by the UHD profile.
+
+def _run_checked(cmd, what, ok_codes=(0,)):
+    """Run ``cmd``; raise DolbyVisionError with stderr on a bad exit code."""
+    log.info("DV %s: %s", what, _quote(cmd))
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode not in ok_codes:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise DolbyVisionError(f"{what} failed (rc={proc.returncode}): {detail}")
+    return proc
+
+
+def rpu_frame_count(rpu_path):
+    """Return the frame count reported by ``dovi_tool info --summary``."""
+    proc = _run_checked(
+        ["dovi_tool", "info", "-i", rpu_path, "--summary"], "RPU summary",
+    )
+    m = re.search(r"Frames:\s*(\d+)", proc.stdout)
+    if not m:
+        raise DolbyVisionError(
+            f"could not read frame count from dovi_tool summary: {proc.stdout.strip()}"
+        )
+    return int(m.group(1))
+
+
+def video_frame_count(path):
+    """Return the number of video packets (frames) in stream v:0 of ``path``."""
+    proc = _run_checked(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+         "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", path],
+        "frame count",
+    )
+    try:
+        return int(proc.stdout.strip().splitlines()[0])
+    except (IndexError, ValueError):
+        raise DolbyVisionError(f"could not parse frame count for {path}: {proc.stdout!r}")
+
+
+def video_frame_rate(path):
+    """Return stream v:0's r_frame_rate as ``num/den`` (e.g. ``24000/1001``)."""
+    proc = _run_checked(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", path],
+        "frame rate",
+    )
+    rate = proc.stdout.strip().splitlines()[0] if proc.stdout.strip() else ""
+    if not re.fullmatch(r"\d+/\d+", rate) or rate.endswith("/0"):
+        raise DolbyVisionError(f"unusable frame rate {rate!r} for {path}")
+    return rate
+
+
+def apply_dolby_vision(encoded_mkv, rpu_path, output_file, scratch_dir,
+                       dry_run=False):
     """
-    if profile != "p81":
-        profile = "p81"  # see extract_rpu() — only P8.1 is fully wired.
-    # dolby-vision-profile 8.1 maps to x265's integer profile id 81.
-    return f"dolby-vision-rpu={rpu_path}:dolby-vision-profile=81:vbv-bufsize=160000:vbv-maxrate=160000"
+    Inject ``rpu_path`` into the HDR10 video of ``encoded_mkv`` and write
+    ``output_file`` with every other track, tag, and chapter carried over
+    from ``encoded_mkv`` unchanged.
+
+    Steps: extract HEVC -> compare frame counts -> dovi_tool inject-rpu ->
+    mkvmerge remux -> ffprobe verification (Dolby Vision Profile 8).
+
+    Raises DolbyVisionError on any failure. The caller decides what to do
+    with ``scratch_dir`` (it is kept on failure so the HDR10 encode is not
+    lost).
+    """
+    base_hevc = os.path.join(scratch_dir, "video.hevc")
+    dv_hevc = os.path.join(scratch_dir, "video_dv.hevc")
+
+    extract_cmd = [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+        "-i", encoded_mkv, "-map", "0:v:0", "-c:v", "copy",
+        "-bsf:v", "hevc_mp4toannexb", "-f", "hevc", base_hevc,
+    ]
+    inject_cmd = [
+        "dovi_tool", "inject-rpu", "-i", base_hevc, "--rpu-in", rpu_path,
+        "-o", dv_hevc,
+    ]
+
+    if dry_run:
+        log.info("DV extract encoded HEVC: %s", _quote(extract_cmd))
+        log.info("DV inject: %s", _quote(inject_cmd))
+        log.info("DV remux: mkvmerge -o %s --default-duration 0:<fps>p "
+                 "%s --no-video %s", shlex.quote(output_file),
+                 shlex.quote(dv_hevc), shlex.quote(encoded_mkv))
+        log.info("--dry-run: skipping Dolby Vision injection")
+        return output_file
+
+    rpu_frames = rpu_frame_count(rpu_path)
+    enc_frames = video_frame_count(encoded_mkv)
+    if rpu_frames != enc_frames:
+        raise DolbyVisionError(
+            f"frame count mismatch: RPU has {rpu_frames} frames, encode has "
+            f"{enc_frames}; refusing to inject misaligned metadata"
+        )
+    log.info("DV frame counts match (%d)", enc_frames)
+
+    fps = video_frame_rate(encoded_mkv)
+
+    _run_checked(extract_cmd, "extract encoded HEVC")
+    _run_checked(inject_cmd, "inject-rpu")
+    try:
+        os.remove(base_hevc)  # ~stream-size of video; free it before remux
+    except OSError:
+        pass
+
+    remux_cmd = [
+        "mkvmerge", "-q", "-o", output_file,
+        "--default-duration", f"0:{fps}p",
+        "--default-track-flag", "0:yes",
+        dv_hevc,
+        "--no-video", encoded_mkv,
+    ]
+    # mkvmerge: 0 = ok, 1 = ok with warnings, 2 = error.
+    _run_checked(remux_cmd, "mkvmerge remux", ok_codes=(0, 1))
+
+    dv = detect_dolby_vision(output_file)
+    if not dv["present"] or dv.get("profile") != 8:
+        raise DolbyVisionError(
+            f"output verification failed: expected Dolby Vision Profile 8 in "
+            f"{output_file}, ffprobe reported {dv}"
+        )
+    log.info("DV verified: %s reports Dolby Vision Profile %s",
+             output_file, dv.get("profile"))
+    return output_file
