@@ -2,13 +2,7 @@
 # Copyright (c) 2026 formeroosid
 
 #!/usr/bin/env python3
-"""
-Cinnephillia — Movie & TV processing entry point.
-
-Thin wrapper that delegates to:
-  - cinephillia.movies.movie_pipeline.process_movie
-  - cinephillia.tv.tv_pipeline.process_tv_series
-"""
+"""Cinnephillia — Movie & TV processing entry point."""
 import argparse
 from pathlib import Path
 
@@ -19,20 +13,13 @@ from tv.tv_pipeline import process_tv_series
 
 def main():
     parser = argparse.ArgumentParser(description="Cinnephillia media processor")
+    parser.add_argument("path", help="Path to Movie Title (YYYY) or TV series root")
     parser.add_argument(
-        "path",
-        help="Path to Movie Title (YYYY) or TV series root",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["feature", "extras", "both"],
-        default="both",
+        "--mode", choices=["feature", "extras", "both"], default="both",
         help="Process main feature, extras, or both (movie mode only).",
     )
     parser.add_argument(
-        "--type",
-        choices=["movie", "tv"],
-        default="movie",
+        "--type", choices=["movie", "tv"], default="movie",
         help="Content type: movie or tv.",
     )
     parser.add_argument(
@@ -40,15 +27,12 @@ def main():
         help="Optional override for TV series name (defaults to folder name).",
     )
     parser.add_argument(
-        "--preserve-all-audio",
-        action="store_true",
+        "--preserve-all-audio", action="store_true",
         help="Map and losslessly copy every audio track (commentary, "
              "alternate languages). Default: keep only the primary track.",
     )
     parser.add_argument(
-        "--dolby-vision",
-        choices=["auto", "off", "p81", "p76"],
-        default="auto",
+        "--dolby-vision", choices=["auto", "off", "p81", "p76"], default="auto",
         help="Dolby Vision handling for UHD sources. 'auto' (default) "
              "preserves DV as Profile 8.1 when the source has a DV RPU and "
              "dovi_tool is available; otherwise falls through to HDR10. "
@@ -57,32 +41,36 @@ def main():
              "Only affects the UHD profile.",
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
+        "--encoder", choices=["native", "nvenc"], default="native",
+        help="Movie video-encoding backend. 'native' preserves x265 for HD/UHD "
+             "and VAAPI for SD. 'nvenc' uses NVIDIA HEVC on GPU 0 for features "
+             "and extras. NVENC is not yet supported in TV mode.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
         help="Log every ffmpeg / dovi_tool command without executing it.",
     )
     args = parser.parse_args()
+    if args.type == "tv" and args.encoder != "native":
+        parser.error("--encoder nvenc is currently supported only for --type movie")
 
     setup_logging()
-
     root = Path(args.path)
-
     if args.type == "movie":
-        process_movie(str(root), args.mode,
-                      preserve_all_audio=args.preserve_all_audio,
-                      dolby_vision=args.dolby_vision,
-                      dry_run=args.dry_run)
+        process_movie(
+            str(root), args.mode,
+            preserve_all_audio=args.preserve_all_audio,
+            dolby_vision=args.dolby_vision,
+            dry_run=args.dry_run,
+            encoder=args.encoder,
+        )
         return
 
     series_name = args.series_name or root.name
-    input_root = root / "rip"
-    staging_dir = root / "process" / "staging"
-    output_root = root / "Plex Movie Files"
-
     process_tv_series(
-        input_root=str(input_root),
-        staging_dir=str(staging_dir),
-        output_root=str(output_root),
+        input_root=str(root / "rip"),
+        staging_dir=str(root / "process" / "staging"),
+        output_root=str(root / "Plex Movie Files"),
         series_name=series_name,
         duration_min=None,
         duration_max=None,
