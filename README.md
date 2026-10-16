@@ -1,271 +1,180 @@
 # Cinnephillia
 
-A pragmatic, ffmpeg-native media transcoding pipeline for cinephiles who rip their own optical media. Cinnephillia takes MakeMKV rips and produces clean, Plex-friendly libraries with consistent video quality, lossless primary audio, and predictable file naming.
-
-It is opinionated by design: it does not try to be a universal transcoder, and it does not try to do online metadata matching. It does one thing well — turn a folder of MakeMKV rips into a tidy library — and stays out of your way.
+A pragmatic, ffmpeg-native media transcoding pipeline for cinephiles who rip their own optical media. Cinnephillia takes MakeMKV rips and produces Plex-friendly libraries with predictable naming, copied audio, and selectable video-encoding backends. It does not perform online metadata matching.
 
 ## Features
 
-- ffmpeg 8.x pipeline using `libx265` for Blu-ray and UHD encodes
-- Resolution-based profile selection: SD/DVD, Blu-ray (1080p), and UHD (2160p HDR10)
-- Single-track audio policy preserving DTS-HD MA losslessly when available
-- First English PGS subtitle preserved when present
-- Chapter markers preserved
-- Sequential, deterministic TV episode naming, no metadata matching
-- Suffix-driven movie extras placement using the Plex local-files convention
-- Modular Python layout: `core/`, `movies/`, `tv/`, `shared/`, plus `utils/` shell helpers
+- Native backend (default): software `libx265` for HD/UHD and `hevc_vaapi` for SD.
+- Optional NVIDIA `hevc_nvenc` backend for movie features and extras.
+- Resolution-based profile selection for movie features.
+- First audio track copied losslessly by default; `--preserve-all-audio` copies every audio track.
+- First subtitle identified as English or untagged by the shared probe is selected and copied; the selector is not restricted to PGS. Inspect dry-run stream mappings.
+- Chapter mapping, including chapter metadata, through the shared runner.
+- Optional UHD Dolby Vision RPU conversion/injection targeting Profile 8.1, with Matroska HDR/color-property preservation and verification.
+- Movie extras placement by category-name suffix; sequential TV episode naming without metadata matching.
 
-## Why software x265
+See [NVIDIA/NVENC guide](docs/NVENC.md) for requirements, settings, limitations, and acceptance testing.
 
-Cinnephillia uses software `libx265` for Blu-ray and UHD because, on real-world projector setups at typical viewing distances, the compression efficiency advantage over `hevc_vaapi` is visible and meaningful. SD/DVD continues to use VAAPI because the source resolution does not benefit from slow software encoding.
+## Encoding backends and profiles
 
-## Profiles
+`--encoder native` is the default. `--encoder nvenc` is opt-in and supported only with `--type movie`; TV mode rejects it. Native HD/UHD encoding remains software x265. NVENC changes video encoding, not the shared audio/subtitle/chapter handling. GPU decoding is not enabled by this option.
 
-| Profile | Source | Encoder | Pixel format | Rate control | Color signaling |
+| Backend | Profile | Video encoder | Format | Rate control | Color options |
 |---|---|---|---|---|---|
-| `sd` | DVD / SD broadcast | `hevc_vaapi` | `nv12` | `-b:v 5M` | n/a |
-| `bluray` | 1080p Blu-ray | `libx265` | `yuv420p` | `-crf 20`, `preset slow` | BT.709 limited range |
-| `4k` (UHD) | 2160p HDR10 / DV Blu-ray | `libx265` | `yuv420p10le` | `-crf 23`, `preset slow` | BT.2020 / SMPTE ST 2084 / HDR10 (+ optional Dolby Vision P8.1) |
+| native | `sd` | `hevc_vaapi` | nv12 with hwupload | 5M bitrate | No explicit color override |
+| native | `bluray` | `libx265` | yuv420p | CRF 20, slow | BT.709 |
+| native | `4k` | `libx265` | yuv420p10le | CRF 23, slow | BT.2020/PQ, x265 HDR10 options |
+| nvenc | `sd` | `hevc_nvenc` Main | nv12 | VBR, CQ 20, bitrate 0 | No explicit color override |
+| nvenc | `bluray` | `hevc_nvenc` Main | nv12 | VBR, CQ 20, bitrate 0 | BT.709 |
+| nvenc | `4k` | `hevc_nvenc` Main10 | p010le | VBR, CQ 23, bitrate 0 | Limited-range BT.2020/PQ |
 
-Profile selection is automatic based on detected video resolution. A single audio track is selected with this priority: English DTS-HD MA → any DTS English → first audio. The first English PGS subtitle is included if present. Chapters are always preserved.
+All NVENC profiles select GPU 0, preset P6, HQ tuning, and passthrough frame timing. CQ values are starting settings, not equivalents of x265 CRF values.
+
+Movie features select `4k` when width is at least 3840 or height at least 2160; otherwise `sd` when width is at most 720 or height at most 576; otherwise `bluray`. Unknown dimensions fall back to `bluray`. This is resolution-based selection, not HDR detection or tone mapping: inspect the profile before processing SDR UHD or other atypical sources.
+
+Movie extras always use the `bluray` profile with the chosen backend, regardless of source dimensions. The legacy `extras_720p` name is only a log label; it does not request 720p scaling. Extras do not engage the UHD Dolby Vision path.
 
 ## Requirements
 
-- Python 3.10+
-- A modern ffmpeg build with `libx265`, `hevc_vaapi`, and `hevc_vulkan` enabled. The author runs a custom ffmpeg 8.1 build under `/usr/local`.
-- `ffprobe` available on `PATH`
-- (Optional, for Dolby Vision preservation on UHD sources) [`dovi_tool`](https://github.com/quietvoid/dovi_tool) and `mkvmerge` ([MKVToolNix](https://mkvtoolnix.download/)) on `PATH`. When either is absent, `--dolby-vision auto` falls back to HDR10-only with a warning; `p81`/`p76` fail instead.
+- Python 3.10+.
+- `ffmpeg` and `ffprobe` on `PATH`; the project targets a modern ffmpeg 8.x workflow.
+- Encoder support for the selected backend: `libx265` for native HD/UHD, or `hevc_vaapi` and a usable `/dev/dri/renderD128` for native SD.
+- For NVENC: a compatible NVIDIA GPU/driver and an ffmpeg build with usable `hevc_nvenc` support. UHD needs Main10 support. See the [NVENC checks](docs/NVENC.md#prerequisites-and-checks).
+- For Dolby Vision: `dovi_tool` and `mkvmerge` (MKVToolNix) on `PATH`, plus a source with detected Dolby Vision metadata.
+- MakeMKV or another source of suitable MKV rips.
 
-### How Dolby Vision is preserved
-
-libx265 cannot take a Dolby Vision RPU through ffmpeg: `-x265-params dolby-vision-rpu=...` is an x265 CLI-only option, and ffmpeg logs `Unknown option: dolby-vision-rpu` and encodes plain HDR10. Cinnephillia therefore adds Dolby Vision after the encode:
-
-1. `dovi_tool -m 2 extract-rpu` pulls the source RPU and converts it to Profile 8.1 (dual-layer P7 sources lose their enhancement layer, as expected for 8.1).
-2. The film is encoded as normal HDR10 into a scratch directory (`.cinne-dv-*`) beside the output.
-3. RPU and encode frame counts are compared; a mismatch aborts.
-4. `dovi_tool inject-rpu` adds the RPU to the encoded HEVC, and `mkvmerge` remuxes it with the encode's audio, subtitles, and chapters.
-5. ffprobe must report Dolby Vision Profile 8 on the final file. On any failure the final file is removed and the scratch directory (HDR10 `encode_hdr10.mkv` and `rpu.bin`) is kept for inspection.
-
-Free space needed beside the output during a DV run is roughly 2x the final file plus one video-stream copy.
-
-Every encode also runs a one-frame encoder preflight with the real video arguments. Any `Unknown option`, `Invalid value`, or option-parsing error stops the job before the long encode starts.
-- A VAAPI-capable GPU node at `/dev/dri/renderD128` for the SD profile
-- MakeMKV for ripping discs to MKV
+Each real encode first attempts a one-frame encoder preflight using the actual video arguments. A nonzero exit or recognized option-parsing error stops that encode. A dry run skips this hardware check.
 
 ## Installation
 
 ```bash
-git clone https://github.com/formeroosid/Cinnephillia.git
-cd Cinnephillia
+git clone https://github.com/formeroosid/Cinnepihillia.git
+cd Cinnepihillia
 ```
 
-There is no `setup.py` or PyPI package; Cinnephillia is run directly from the project root.
+There is no `setup.py` or PyPI package; run from the project root. NVENC documentation describes the feature branch associated with PR #10; it does not imply that the branch has been merged into `master`.
 
 ## Usage
 
 ```bash
-# A single movie
-python3 Cinnephillia.py "/mnt/bigbrother/Movies/Lincoln (2012)" \
+# Native movie feature (default backend)
+python3 Cinnephillia.py "/path/to/Lincoln (2012)" \
     --type movie --mode feature
 
-# A movie plus its extras (after annotating extra files — see below)
-python3 Cinnephillia.py "/mnt/bigbrother/Movies/Lincoln (2012)" \
-    --type movie --mode both
+# Preview NVIDIA movie processing with every audio track
+python3 Cinnephillia.py "/path/to/Movie Title (YYYY)" \
+    --type movie --mode both --encoder nvenc \
+    --preserve-all-audio --dolby-vision auto --dry-run
 
-# A TV series, ripping all discs and rendering all episodes
-python3 Cinnephillia.py "/mnt/bigbrother/TV/Star Trek - Strange New Worlds{tvdb-382389}/" \
-    --mode both --type tv \
-    --series-name "Star Trek - Strange New Worlds"
-```
-```bash
-# Preserve every audio track (commentary, alternate languages) losslessly
-python3 Cinnephillia.py "/mnt/bigbrother/Movies/Lincoln (2012)" \
-    --type movie --mode both --preserve-all-audio
-```
-```bash
-# UHD source with Dolby Vision, force P8.1 preservation and error out
-# if dovi_tool is missing or the source has no DV RPU
-python3 Cinnephillia.py "/mnt/bigbrother/Movies/The Matrix (1999)" \
-    --type movie --mode feature --dolby-vision p81
+# Require Dolby Vision preservation for an applicable UHD feature
+python3 Cinnephillia.py "/path/to/Movie Title (YYYY)" \
+    --type movie --mode feature --encoder nvenc \
+    --preserve-all-audio --dolby-vision p81 --dry-run
 
-# Preview the ffmpeg / dovi_tool commands without executing anything
-python3 Cinnephillia.py "/mnt/bigbrother/Movies/The Matrix (1999)" \
-    --type movie --mode feature --dry-run
+# TV retains the native backend
+python3 Cinnephillia.py "/path/to/Series Title" \
+    --type tv --series-name "Series Title"
 ```
 
-`--mode` is one of `feature`, `extras`, or `both`. `--type` is `movie` or `tv`. `--dolby-vision` is one of `auto` (default), `off`, `p81`, `p76`; only the UHD profile is affected. `--dry-run` logs every command without executing.
-
-## Movie extras workflow
-
-Movies support a fully automated extras pipeline driven by filename suffixes. The workflow is:
-
-1. **Rip the disc with MakeMKV** into the title's `rip/` directory. All titles land as `_t00.mkv`, `_t01.mkv`, etc., with no semantic meaning attached.
-2. **Review and annotate.** Identify which rips are extras and rename them in-place using a recognized Plex local-files suffix. Files without a suffix are treated as the feature.
-3. **Run Cinnephillia with `--mode extras` or `--mode both`.** The pipeline parses each filename's suffix, encodes the file using the appropriate resolution profile, writes the encoded MKV to `process/staging/`, and creates a symlink in the matching `Plex Movie Files/<Category>/` folder.
-
-### Suffix → folder mapping
-
-| Suffix | Plex Movie Files folder |
+| Option | Behavior |
 |---|---|
-| `--behindthescenes` | `Behind The Scenes/` |
-| `--deleted` | `Deleted Scenes/` |
-| `--featurette` / `-featurettes` | `Featurettes/` |
-| `--interview` | `Interviews/` |
-| `--scene` | `Scenes/` |
-| `--short` | `Shorts/` |
-| `--trailer` | `Trailers/` |
-| `--other` | `Other/` |
-| (none) | feature output at the title root |
+| `--type movie|tv` | Default: movie |
+| `--mode feature|extras|both` | Movie processing selection; default: both |
+| `--encoder native|nvenc` | Default: native; NVENC is movie-only |
+| `--preserve-all-audio` | Copy all audio tracks rather than only the first |
+| `--dolby-vision auto|off|p81|p76` | Default: auto; only applies to `4k` profiles |
+| `--dry-run` | Preview processing commands; skips encoding, preflight, RPU extraction/injection, and HDR remux verification |
 
-Extras go through the same `select_preset()` resolution check as features, so a 1080p extra encodes with the `bluray` software x265 profile, a 2160p extra encodes with the UHD profile, and an SD extra goes through VAAPI. The single-audio policy and PGS subtitle handling apply uniformly to features and extras alike.
+Dry runs still probe inputs and may create output/scratch directories. They are not a substitute for hardware or playback testing. Inspect paths and mappings in an isolated test root before removing `--dry-run`. Encoding uses ffmpeg `-y`; do not test against valuable existing output files.
 
-### TV extras
+## Dolby Vision and HDR metadata
 
-The TV pipeline currently handles only sequential episode naming. To add TV extras, encode the extras through Cinnephillia (or by hand) into `process/staging/` and create the symlinks under the series-level `Plex Movie Files/Behind The Scenes/`, `Deleted Scenes/`, `Featurettes/`, etc. yourself. The movie suffix-driven placement does not run on TV titles.
+For an applicable UHD profile, `auto` enables preservation when the source has detected Dolby Vision metadata and both external tools are available. If a required tool is absent it warns and proceeds without Dolby Vision. Forced `p81`/`p76` modes fail when the source metadata or tools are missing. `off` disables preservation. `p76` currently warns and converts to Profile 8.1; enhancement-layer preservation is not implemented.
 
-## Directory conventions
+The pipeline:
 
-Cinnephillia expects each title to live in its own folder. Inside that folder, three subdirectories define the lifecycle: `rip`, `process`, and `Plex Movie Files`.
+1. Extracts the RPU using `dovi_tool -m 2 extract-rpu`.
+2. Encodes the base video into `.cinne-dv-*/encode_hdr10.mkv` beside the output.
+3. Reads video packet counts and frame rate through structured ffprobe JSON and refuses injection if RPU/video counts differ.
+4. Reads available HDR/color track properties from the encoded MKV using `mkvmerge -J`.
+5. Extracts HEVC, injects the RPU, and remuxes with copied audio, subtitles, chapters, and discovered HDR/color properties.
+6. Requires detected Dolby Vision Profile 8 and verifies the copied HDR/color properties.
 
-### TV series
+HDR values are read from the encoded MKV, not hardcoded or reconstructed from missing source metadata. Preserving Matroska track properties does not insert static HDR SEI messages into elementary HEVC. Automated DV verification currently checks Profile 8, not specifically compatibility ID 1; acceptance testing must check Profile 8.1 and playback separately.
 
-For a TV series, Cinnephillia walks `rip/SXXDXX/` directories in lexical order and renders each MKV through the appropriate profile into `process/staging/`. It then creates symlinks under `Plex Movie Files/Season XX/` named sequentially as `<series name> SXXEXX_.mkv`. Episode numbers are assigned in disc-then-title order across the entire season, with no metadata matching and no duration filtering. The trailing underscore is intentional and left for hand annotation during review.
+On a handled post-encode Dolby Vision failure, the runner removes the final output and retains the encoded HDR10 MKV/RPU scratch directory for inspection. Earlier extraction/encoding failures have different cleanup behavior. Allow ample free space beside the output: injection/remux can retain an encoded MKV, raw HEVC copies, and the final MKV simultaneously.
 
-A series folder looks like this (abbreviated):
+## Movie layout and extras
 
-```
-Star Trek - Strange New Worlds{tvdb-382389}/
-├── Plex Movie Files
-│   ├── Behind The Scenes
-│   │   ├── Season 3 - Gag Reel.mkv -> .../process/staging/S3D1/...t08.mkv
-│   │   └── ...
-│   ├── Deleted Scenes
-│   │   ├── Season3 - Deleted Scenes.mkv -> .../process/staging/S3D1/...t00.mkv
-│   │   └── ...
-│   ├── Featurettes
-│   │   ├── Exploring New Worlds -featurettes.mkv -> .../process/staging/S3D3/...t01.mkv
-│   │   └── ...
-│   ├── Interviews
-│   ├── Other
-│   ├── Scenes
-│   ├── Season 1
-│   │   ├── Star Trek - Strange New Worlds S01E01_.mkv -> .../process/staging/S1D1/...t00.mkv
-│   │   ├── Star Trek - Strange New Worlds S01E02_.mkv -> .../process/staging/S1D1/...t01.mkv
-│   │   ├── ...
-│   │   └── Star Trek - Strange New Worlds S01E10_.mkv -> .../process/staging/S1D3/...t01.mkv
-│   ├── Season 2
-│   │   ├── Star Trek - Strange New Worlds S02E01_.mkv -> .../process/staging/S2D1/...t00.mkv
-│   │   ├── ...
-│   │   └── Star Trek - Strange New Worlds S02E10_.mkv -> .../process/staging/S2D4/...t00.mkv
-│   ├── Shorts
-│   └── Trailers
-├── process
-│   └── staging
-│       ├── S1D1
-│       │   ├── Star Trek- Strange New Worlds - Season 1 (Disc 1)_t00.mkv
-│       │   └── ...
-│       ├── S1D2
-│       ├── ...
-│       └── S2D4
-│           └── Star Trek- Strange New Worlds - Season 2 (Disc 4)_t00.mkv
-└── rip
-    ├── S1D1
-    │   ├── Star Trek- Strange New Worlds - Season 1 (Disc 1)_t00.mkv
-    │   └── ...
-    ├── ...
-    └── S2D4
-        └── Star Trek- Strange New Worlds - Season 2 (Disc 4)_t00.mkv
-```
+The largest MKV in a movie's `rip/` directory is assumed to be the main feature. All other MKVs are extras, including in extras-only mode. This is a size heuristic, not title recognition.
 
-The folder name may include Plex/TVDB-style hints such as `{tvdb-382389}` for indexer matching. Cinnephillia does not parse these — they are for Plex.
+Movie processing writes real files directly under `Plex Movie Files/`; it does not use the TV staging/symlink workflow.
 
-### Movies
-
-Movie titles use the same three-subdirectory pattern, but the `Plex Movie Files/` layout is flat rather than season-based. After ripping, files in `rip/` may be renamed with extras suffixes before encoding:
-
-```
-Lincoln (2012)/
+```text
+Movie Title (YYYY)/
 ├── rip/
-│   ├── Lincoln (2012)_t00.mkv                              # the feature, untagged
-│   ├── Making Of--featurette.mkv                           # tagged as a Featurette
-│   ├── Deleted Scene 1--deleted.mkv                        # tagged as a Deleted Scene
-│   └── Trailer--trailer.mkv                                # tagged as a Trailer
-├── process/
-│   └── staging/
-│       ├── Lincoln (2012).mkv
-│       ├── Making Of--featurette.mkv
-│       ├── Deleted Scene 1--deleted.mkv
-│       └── Trailer--trailer.mkv
+│   ├── Feature_t00.mkv
+│   ├── Making Of-Featurettes.mkv
+│   ├── Deleted Scene-Deleted Scenes.mkv
+│   └── Preview-Trailers.mkv
 └── Plex Movie Files/
-    ├── Lincoln (2012).mkv -> ../process/staging/Lincoln (2012).mkv
-    ├── Behind The Scenes/
-    ├── Deleted Scenes/
-    │   └── Deleted Scene 1--deleted.mkv -> ../../process/staging/Deleted Scene 1--deleted.mkv
+    ├── Movie Title (YYYY).mkv
     ├── Featurettes/
-    │   └── Making Of--featurette.mkv -> ../../process/staging/Making Of--featurette.mkv
-    ├── Interviews/
-    ├── Other/
-    ├── Scenes/
-    ├── Shorts/
+    │   └── Making Of.mkv
+    ├── Deleted Scenes/
+    │   └── Deleted Scene.mkv
     └── Trailers/
-        └── Trailer--trailer.mkv -> ../../process/staging/Trailer--trailer.mkv
+        └── Preview.mkv
 ```
 
-### Extras folders
+Recognized category names are `Behind The Scenes`, `Deleted Scenes`, `Featurettes`, `Interviews`, `Other`, `Shorts`, and `Trailers`. Matching is case-insensitive; spaces within category names may be spaces, underscores, or hyphens. A space, underscore, or hyphen separates the title from the category. The matched category suffix is removed from the output filename. Unmatched extras retain their basename and go under `Other/`.
 
-The `Behind The Scenes/`, `Deleted Scenes/`, `Featurettes/`, `Interviews/`, `Other/`, `Scenes/`, `Shorts/`, and `Trailers/` folders match Plex's recognized extras categories. For movies these are populated automatically from filename suffixes; for TV you create the symlinks during review.
+Use full category names, as in the example. The current matcher does not implement the older documented shorthand suffixes such as `--featurette`, `--deleted`, or `--trailer`; there is no `Scenes` category in the current movie list.
 
-## Utility scripts (`utils/`)
+## TV layout and review
 
-Cinnephillia ships a small set of shell helpers under `utils/` that handle the "after the encode" side of things — staging the finished `Plex Movie Files/` trees onto the Plex server and triggering library refreshes. They are intentionally separate from the Python pipeline so you can run them independently from any host.
+The TV workflow uses `rip/`, `process/staging/`, and `Plex Movie Files/Season XX/`. It assigns episode numbers in disc/title order and creates Plex-facing symlinks to staged encodes. Episode names have the form `<series name> SXXEXX_.mkv`; the trailing underscore leaves room for manual annotation.
 
-| Script | Purpose                                                                                                                                                                                                                                                                                                                                                                                           |
-|---|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `utils/copy_plex_movies.sh` | Walks a Movies root (or a single movie directory), and for each title rsyncs its `Plex Movie Files/` contents into a clean destination tree organized by movie title. Run from the staging machine; takes `SOURCE_DIR` and `DEST_DIR` as arguments.                                                                                                                                               |
-| `utils/copy_plex_tv.sh` | The TV-side counterpart to `copy_plex_movies.sh`. Accepts either a TV root containing many series or a single series directory, and rsyncs each series' `Plex Movie Files/` contents into a per-series subdirectory of the destination. Uses `rsync -rltL` so symlinked episode files copy as real data.                                                                                          |
-| `utils/cp2movie.sh` | Run from a movie title's working directory on the Plex server (the script enforces `hostname == lumpy` _Update for your own Plex hostname_). Rsyncs the current title into `/data/Media/Movies/`, applies `jgordon:plex` _(update for your username)_ ownership and Plex-friendly permissions, then triggers a Movies-library metadata refresh via the local Plex API. Supports `-n` for a dry run. |
-| `utils/cp2tv.sh` | The TV-side counterpart to `cp2movie.sh`. Rsyncs the current series directory into `/data/Media/TV Shows/` on Lumpy with the same ownership and chmod policy, then triggers a TV-library refresh against the local Plex API. Supports `-n` for a dry run.                                                                                                                                         |
+Review episode order and bonus titles manually: there is no online metadata matching or automatic semantic identification. Folder hints such as `{tvdb-382389}` are for Plex, not parsed by Cinnephillia. Movie category matching does not run for TV extras; arrange those separately.
 
-The `copy_plex_*` scripts are the portable, "stage anywhere" path; the `cp2*` scripts are the opinionated deployment path that also kicks Plex.
+## Utility scripts
 
-> Note: `cp2movie.sh` and `cp2tv.sh` read `PLEX_TOKEN` from the environment and assume Plex is reachable on `127.0.0.1:32400`. Set `PLEX_TOKEN` before running, and confirm the section IDs (`1` for Movies, `2` for TV) match your install.
+| Script | Purpose |
+|---|---|
+| `utils/copy_plex_movies.sh` | Copy movie `Plex Movie Files/` trees to a destination organized by title; accepts source and destination directories |
+| `utils/copy_plex_tv.sh` | Copy TV trees; dereference staged episode symlinks into real destination files |
+| `utils/cp2movie.sh` | Opinionated Plex-host movie deployment and library refresh; supports `-n` |
+| `utils/cp2tv.sh` | Opinionated Plex-host TV deployment and library refresh; supports `-n` |
 
-## Design choices worth knowing
+Review scripts before use. The `cp2*` helpers contain author-specific hostname, destination, ownership, and library-section assumptions. They read `PLEX_TOKEN` from the environment and expect Plex on `127.0.0.1:32400`. Adapt these values to your installation.
 
-- **No metadata matching.** TV episodes are renamed sequentially across discs, in disc-then-title order. Variable runtimes, "play all" titles, and bonus features are not filtered out automatically. You review the `Plex Movie Files/Season XX/` folder by hand and rename or remove what you don't want.
-- **Single primary audio (default).** Commentary tracks and lossy DTS cores are dropped by default. The DTS-HD MA primary is copied losslessly. Pass `--preserve-all-audio` to keep every audio track instead — each is mapped, copied losslessly with `-c:a copy`, and tagged with its original language. Available in both movie and TV modes via `Cinnephillia.py` and `python3 -m tv.cli process`.
-- **Symlinks, not copies.** `Plex Movie Files/` contains symlinks into `process/staging/`. This keeps the Plex view tidy while the encoded files live exactly once on disk.
-- **Suffix-driven extras for movies.** Annotating MakeMKV rips with `--featurette`, `--deleted`, etc. is the contract that drives automatic Plex-folder placement. No config files, no GUI.
-- **Trailing underscore in episode filenames.** `<series> SXXEXX_.mkv` leaves an obvious place for hand annotation during review without breaking Plex matching.
+## Tests and acceptance status
+
+```bash
+python3 -m unittest discover -s tests -p 'test_dolby_vision.py' -v
+python3 -m unittest discover -s tests -p 'test_encoder_backend.py' -v
+```
+
+The unit tests cover mocked Dolby Vision/HDR operations and hardware-independent backend settings; they do not establish playback quality or GPU availability.
+
+A full-length Chinatown test on Larry completed NVENC encoding and Dolby Vision injection but exposed HDR container metadata loss during remux. A manual container repair restored the reported properties. PR #10 now contains the automated preservation fix; a clean-checkout test run and short hardware regression of that committed fix remain pending. HD/SD NVENC, extras, and playback/image-quality acceptance also remain pending. See the [NVENC acceptance checklist](docs/NVENC.md#acceptance-checklist).
 
 ## Project layout
 
-```
-Cinnephillia/
-├── Cinnephillia.py            # CLI entry point and dispatcher
-├── core/
-│   ├── ffmpeg_profiles.py     # Profile dicts and select_preset()
-│   ├── ffmpeg_runner.py       # encode_with_profile() and helpers
-│   ├── media_analyzer.py      # detect_resolution() and probe helpers
-│   └── ...
-├── movies/
-│   └── movie_pipeline.py
-├── tv/
-│   ├── disc_parser.py
-│   └── tv_pipeline.py
+```text
+Cinnepihillia/
+├── Cinnephillia.py
+├── core/                 # profiles, shared runner, probing, Dolby Vision
+├── movies/               # feature and extras routing
+├── tv/                   # TV processing and naming
 ├── shared/
-│   └── ...
-└── utils/
-    ├── copy_plex_movies.sh    # Stage movies into a clean destination tree
-    ├── copy_plex_tv.sh        # Stage TV series into a clean destination tree
-    ├── cp2movie.sh            # Push current movie to Lumpy + refresh Plex
-    └── cp2tv.sh               # Push current series to Lumpy + refresh Plex
+├── tests/
+├── docs/NVENC.md
+└── utils/                # deployment helpers
 ```
 
-## Status
+## Scope and license
 
-Cinnephillia is feature-complete for the author's home theater workflow and is considered finalized. Issues and PRs are welcome at https://github.com/formeroosid/Cinnephillia, but the scope is intentionally small.
-
-## License
+The scope is intentionally small: local media processing for a home-theater workflow, not universal transcoding or metadata management. Report issues and review changes in the repository.
 
 Cinnephillia is released under the [MIT License](LICENSE). © 2026 formeroosid.
