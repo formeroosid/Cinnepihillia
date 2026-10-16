@@ -4,46 +4,81 @@
 import logging
 
 log = logging.getLogger(__name__)
-
 EXTRAS_PRESET_NAME = "extras_720p"  # used just as a label
 
 
-def select_preset(width, height):
-    """
-    Choose an ffmpeg profile based on resolution.
-    Returns a dict with keys:
-      - name: label
-      - input_args: list[str] for ffmpeg input-side options (optional)
-      - video_args: list[str] for ffmpeg video options
-    """
+def apply_encoder_backend(profile, encoder="native"):
+    """Select native profiles or NVIDIA HEVC without changing profile names."""
+    if encoder not in {"native", "nvenc"}:
+        raise ValueError(f"Unsupported encoder backend: {encoder!r}")
+    if encoder == "native":
+        return profile
+    name = profile["name"]
+    if name not in {"4k", "bluray", "sd"}:
+        raise ValueError(f"Unsupported NVENC profile: {name!r}")
+    is_uhd = name == "4k"
+    video_args = [
+        "-vf", "format=p010le" if is_uhd else "format=nv12",
+        "-fps_mode", "passthrough",
+        "-c:v", "hevc_nvenc",
+        "-gpu", "0",
+        "-profile:v", "main10" if is_uhd else "main",
+        "-preset", "p6",
+        "-tune", "hq",
+        "-rc", "vbr",
+        "-cq", "23" if is_uhd else "20",
+        "-b:v", "0",
+    ]
+    if is_uhd:
+        video_args += [
+            "-color_range", "tv",
+            "-color_primaries", "bt2020",
+            "-color_trc", "smpte2084",
+            "-colorspace", "bt2020nc",
+        ]
+    elif name == "bluray":
+        video_args += [
+            "-color_primaries", "bt709",
+            "-color_trc", "bt709",
+            "-colorspace", "bt709",
+        ]
+    # Do not force BT.709 onto SD sources.
+    result = dict(profile)
+    result["input_args"] = []
+    result["video_args"] = video_args
+    log.info("Encoder backend: nvenc; profile=%s; GPU=0; preset=p6; CQ=%s",
+             name, "23" if is_uhd else "20")
+    return result
+
+
+def select_preset(width, height, encoder="native"):
+    """Choose a resolution profile and apply the encoder backend."""
     if width is None or height is None:
         log.info("Could not detect resolution, using BluRay/HD profile.")
-        return _bluray_profile()
-
-    if width >= 3840 or height >= 2160:
+        profile = _bluray_profile()
+    elif width >= 3840 or height >= 2160:
         log.info(f"Detected 4K ({width}x{height}).")
-        return _uhd_profile()
-
-    if width <= 720 or height <= 576:
+        profile = _uhd_profile()
+    elif width <= 720 or height <= 576:
         log.info(f"Detected SD/DVD ({width}x{height}).")
-        return _sd_profile()
-
-    log.info(f"Detected BluRay/HD ({width}x{height}).")
-    return _bluray_profile()
+        profile = _sd_profile()
+    else:
+        log.info(f"Detected BluRay/HD ({width}x{height}).")
+        profile = _bluray_profile()
+    return apply_encoder_backend(profile, encoder)
 
 
 def _sd_profile():
     return {
         "name": "sd",
-        "input_args": [
-            "-vaapi_device", "/dev/dri/renderD128",
-        ],
+        "input_args": ["-vaapi_device", "/dev/dri/renderD128"],
         "video_args": [
             "-vf", "format=nv12,hwupload",
             "-c:v", "hevc_vaapi",
             "-b:v", "5M",
         ],
     }
+
 
 def _bluray_profile():
     return {
@@ -62,12 +97,9 @@ def _bluray_profile():
         ],
     }
 
+
 def _uhd_profile():
-    # HDR10 static metadata is always signaled here. Dolby Vision is added
-    # after the encode by ``core.dolby_vision.apply_dolby_vision`` (RPU
-    # injection with dovi_tool + mkvmerge remux). Do not add
-    # ``dolby-vision-rpu`` here: libx265 via ffmpeg rejects it as an
-    # unknown option, and the encoder preflight will now fail on it.
+    # Dolby Vision is injected after encoding, not passed through x265 options.
     return {
         "name": "4k",
         "input_args": [],
