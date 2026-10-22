@@ -18,68 +18,49 @@ def main():
         "--mode", choices=["feature", "extras", "both"], default="both",
         help="Process main feature, extras, or both (movie mode only).",
     )
-    parser.add_argument(
-        "--type", choices=["movie", "tv"], default="movie",
-        help="Content type: movie or tv.",
-    )
-    parser.add_argument(
-        "--series-name",
-        help="Optional override for TV series name (defaults to folder name).",
-    )
+    parser.add_argument("--type", choices=["movie", "tv"], default="movie",
+                        help="Content type: movie or tv.")
+    parser.add_argument("--series-name", default=None,
+                        help="Optional TV series name (defaults to folder name).")
     parser.add_argument(
         "--preserve-all-audio", action="store_true",
-        help="Map and losslessly copy every audio track (commentary, "
-             "alternate languages). Default: keep only the primary track.",
+        help="Losslessly copy every audio track; default: keep only the primary track.",
     )
     parser.add_argument(
         "--dolby-vision", choices=["auto", "off", "p81", "p76"], default="auto",
-        help="Dolby Vision handling for UHD sources. 'auto' (default) "
-             "preserves DV as Profile 8.1 when the source has a DV RPU and "
-             "dovi_tool is available; otherwise falls through to HDR10. "
-             "'off' skips DV entirely. 'p81'/'p76' force preservation and "
-             "error out if the source has no DV or dovi_tool is missing. "
-             "Only affects the UHD profile.",
+        help="Movie/TV UHD Dolby Vision handling. auto preserves DV as P8.1 when "
+             "source metadata and dovi_tool/mkvmerge are available. off disables it; "
+             "p81/p76 require source DV and both tools. p76 currently converts to P8.1. "
+             "Only applies to newly encoded UHD profiles; existing TV staging files are skipped.",
     )
     parser.add_argument(
         "--encoder", choices=["native", "nvenc"], default="native",
-        help="Movie video-encoding backend. 'native' preserves x265 for HD/UHD "
-             "and VAAPI for SD. 'nvenc' uses NVIDIA HEVC on GPU 0 for features "
-             "and extras. NVENC is not yet supported in TV mode.",
+        help="Movie/TV video backend. native uses x265 for HD/UHD and VAAPI for SD. "
+             "nvenc uses NVIDIA HEVC on GPU 0. Existing TV staging files are skipped.",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Log every ffmpeg / dovi_tool command without executing it.",
+        help="Movies: preview processing commands. TV: input inventory only, "
+             "without encoder preflight or Dolby Vision planning.",
     )
     args = parser.parse_args()
-    if args.type == "tv" and args.encoder != "native":
-        parser.error("--encoder nvenc is currently supported only for --type movie")
-
     setup_logging()
     root = Path(args.path)
     if args.type == "movie":
-        process_movie(
-            str(root), args.mode,
-            preserve_all_audio=args.preserve_all_audio,
-            dolby_vision=args.dolby_vision,
-            dry_run=args.dry_run,
-            encoder=args.encoder,
-        )
+        process_movie(str(root), args.mode,
+                      preserve_all_audio=args.preserve_all_audio,
+                      dolby_vision=args.dolby_vision, dry_run=args.dry_run,
+                      encoder=args.encoder)
         return
-
-    series_name = args.series_name or root.name
     process_tv_series(
         input_root=str(root / "rip"),
         staging_dir=str(root / "process" / "staging"),
         output_root=str(root / "Plex Movie Files"),
-        series_name=series_name,
-        duration_min=None,
-        duration_max=None,
-        plex_host=None,
-        encode_profile=None,
-        dry_run=args.dry_run,
-        expected_counts=None,
-        use_metadata_rename=False,
-        preserve_all_audio=args.preserve_all_audio,
+        series_name=args.series_name or root.name,
+        duration_min=None, duration_max=None, plex_host=None,
+        encode_profile=None, dry_run=args.dry_run, expected_counts=None,
+        use_metadata_rename=False, preserve_all_audio=args.preserve_all_audio,
+        encoder=args.encoder, dolby_vision=args.dolby_vision,
     )
 
 
