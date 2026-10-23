@@ -1,22 +1,43 @@
 #!/usr/bin/env bash
-# Standalone Plex export. Usage: copy_plex_movies.sh [-n] [--mount PATH] [--name NAME] SOURCE DEST
-# --name overrides the title folder for a single-title source. Never deletes destination files.
 set -euo pipefail
+usage() {
+  cat <<'HELP'
+Usage: copy_plex_movies.sh [OPTIONS] SOURCE DEST
+Export a single movie/series or a collection containing 'Plex Movie Files'.
+SOURCE and DEST are required; the current directory is never selected implicitly.
+  -h, --help       Show this help without copying anything.
+  -n, --dry-run    Preview only; no destination changes.
+  --mount PATH     Require this destination filesystem to be mounted.
+  --name NAME      Destination title folder (single-title source only).
+Symlinks are copied as real data. Hidden entries are excluded. No deletions.
+Requires Bash, GNU coreutils/findutils, util-linux, and rsync 3.2.3+.
+Example:
+  copy_plex_movies.sh -n --mount /mnt/mule "/path/to/Movie (Year)" /mnt/mule/Movies
+HELP
+}
+arg_error() { printf 'Error: %s\n\n' "$*" >&2; usage >&2; exit 2; }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
-dry=0; required_mount=""; name=""
+need_value() {
+  (($# >= 2)) && [[ -n "$2" && "$2" != -* ]] || arg_error "Missing value for $1"
+}
+(($# > 0)) || { usage; exit 2; }
+dry=0; required_mount=""; name=""; positional=()
 while (($#)); do
   case "$1" in
+    -h|--help) usage; exit 0 ;;
     -n|--dry-run) dry=1; shift ;;
     --mount|--name)
-      (($# >= 2)) || fail "Missing value for $1"
+      need_value "$@"
       case "$1" in --mount) required_mount="$2" ;; --name) name="$2" ;; esac
       shift 2 ;;
-    --) shift; break ;;
-    -*) fail "Unknown option: $1" ;;
-    *) break ;;
+    --) shift; positional+=("$@"); break ;;
+    -*) arg_error "Unknown option: $1" ;;
+    *) positional+=("$1"); shift ;;
   esac
 done
-(($# == 2)) || fail "Usage: ${0##*/} [-n] [--mount PATH] [--name NAME] SOURCE DEST"
+((${#positional[@]} == 2)) || arg_error "SOURCE and DEST are required (exactly two paths)"
+[[ -n "${positional[0]}" && -n "${positional[1]}" ]] || arg_error "SOURCE and DEST must not be empty"
+set -- "${positional[@]}"
 for tool in rsync realpath find sort mountpoint mktemp; do command -v "$tool" >/dev/null || fail "Missing tool: $tool"; done
 src=$(realpath -e -- "$1"); dst=$(realpath -m -- "$2")
 [[ -d "$src" ]] || fail "Source is not a directory: $src"
