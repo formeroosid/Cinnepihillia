@@ -7,7 +7,7 @@ import sys
 import logging
 
 from core.media_analyzer import detect_resolution
-from core.ffmpeg_profiles import select_preset, EXTRAS_PRESET_NAME
+from core.ffmpeg_profiles import select_preset, validate_nvenc_cq, EXTRAS_PRESET_NAME
 from core.ffmpeg_runner import encode_with_profile
 from shared.file_ops import ensure_dir_permissions
 
@@ -49,11 +49,11 @@ def process_main_feature(src, out_dir, title, year, preset,
 def process_extra(src, out_dir, base,
                   preserve_all_audio=False,
                   dolby_vision="auto", dry_run=False,
-                  encoder="native"):
+                  encoder="native", nvenc_cq=None):
     ensure_dir_permissions(out_dir)
     output_file = os.path.join(out_dir, f"{base}.mkv")
     # Keep the existing HD profile for extras, regardless of source resolution.
-    preset = select_preset(1920, 1080, encoder=encoder)
+    preset = select_preset(1920, 1080, encoder=encoder, nvenc_cq=nvenc_cq)
     log.info("Encoding extra with preset '%s' (BluRay profile; backend=%s).",
              EXTRAS_PRESET_NAME, encoder)
     encode_with_profile(src, output_file, preset,
@@ -63,7 +63,8 @@ def process_extra(src, out_dir, base,
 
 
 def process_movie(movie_root, mode="both", preserve_all_audio=False,
-                  dolby_vision="auto", dry_run=False, encoder="native"):
+                  dolby_vision="auto", dry_run=False, encoder="native",
+                  nvenc_cq=None):
     """Process movie features/extras with native or NVIDIA HEVC profiles.
 
     Audio, subtitles, chapters, preflight and Dolby Vision handling remain
@@ -71,6 +72,9 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
     """
     if encoder not in {"native", "nvenc"}:
         raise ValueError(f"Unsupported encoder backend: {encoder!r}")
+    nvenc_cq = validate_nvenc_cq(nvenc_cq)
+    if nvenc_cq is not None and encoder != "nvenc":
+        raise ValueError("--nvenc-cq requires --encoder nvenc")
     log.info("Movie encoder backend: %s", encoder)
     title, year = get_movie_info(movie_root)
     rip_path = os.path.join(movie_root, "rip")
@@ -97,7 +101,7 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
 
     if mode in ("feature", "both") and main_feature:
         width, height = detect_resolution(main_feature)
-        preset = select_preset(width, height, encoder=encoder)
+        preset = select_preset(width, height, encoder=encoder, nvenc_cq=nvenc_cq)
         process_main_feature(main_feature, plex_root, title, year, preset,
                              preserve_all_audio=preserve_all_audio,
                              dolby_vision=dolby_vision,
@@ -118,7 +122,7 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
                                   preserve_all_audio=preserve_all_audio,
                                   dolby_vision=dolby_vision,
                                   dry_run=dry_run,
-                                  encoder=encoder)
+                                  encoder=encoder, nvenc_cq=nvenc_cq)
                     assigned = True
                     break
             if not assigned:
@@ -127,4 +131,4 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
                               preserve_all_audio=preserve_all_audio,
                               dolby_vision=dolby_vision,
                               dry_run=dry_run,
-                              encoder=encoder)
+                              encoder=encoder, nvenc_cq=nvenc_cq)

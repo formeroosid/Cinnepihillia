@@ -30,15 +30,21 @@ A listed encoder is not proof that the GPU/driver is usable. Confirm that the se
 
 ## Settings
 
-Common arguments: `-c:v hevc_nvenc -gpu 0 -preset p6 -tune hq -rc vbr -b:v 0 -fps_mode passthrough`.
+Common arguments: `-c:v hevc_nvenc -gpu 0 -preset p6 -tune hq -rc vbr -b:v 0 -fps_mode passthrough -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 -aq-strength 8 -bf 4 -b_ref_mode middle`.
 
 | Profile | Format filter | HEVC profile | CQ | Color options |
 |---|---|---|---|---|
-| `4k` | `format=p010le` | main10 | 23 | tv range, bt2020 primaries, smpte2084 transfer, bt2020nc matrix |
+| `4k` | `format=p010le` | main10, `-tier high` | 19 | tv range, bt2020 primaries, smpte2084 transfer, bt2020nc matrix |
 | `bluray` | `format=nv12` | main | 20 | bt709 primaries/transfer/matrix |
 | `sd` | `format=nv12` | main | 20 | No explicit color override |
 
-These are fixed starting settings in `core/ffmpeg_profiles.py`, not CLI quality controls. CQ is not numerically interchangeable with x265 CRF; compare output quality and size before adopting it for a library.
+These are starting settings in `core/ffmpeg_profiles.py`. `--nvenc-cq N` (1-51, requires `--encoder nvenc`) overrides the CQ for every NVENC encode in a run, including movie extras; use `--mode feature` to tune only a feature. CQ is not numerically interchangeable with x265 CRF; compare output quality and size before adopting it for a library.
+
+### Quality tuning rationale
+
+The original UHD settings (CQ 23, no AQ, no lookahead, default B-frame structure) produced a 13.4 Mb/s 2001: A Space Odyssey encode from a 64.3 Mb/s source: about 0.067 bits per pixel at 3840x2160/23.976. That is the second UHD title judged below expectations. The revised UHD default lowers CQ to 19 and enables the NVENC quality tools above. Spatial AQ protects flat dark gradients against banding; temporal AQ favors static detail; lookahead and full-resolution multipass improve bit allocation; B-frames used as references improve efficiency. High tier lets the encoder signal peaks above Main-tier Level 5.x limits. The resulting bitrate depends on grain and content and must be measured; it is not a target bitrate.
+
+The encoder does not write HEVC VUI chroma-location fields, so MediaInfo will not report "Type 2" chroma siting on NVENC output. BT.2020 UHD players assume top-left siting, so this is a metadata difference rather than a picture change.
 
 Feature profiles are selected by resolution. UHD selection forces the listed BT.2020/PQ options, so do not treat it as automatic HDR detection or SDR-to-HDR conversion. Unknown dimensions fall back to the HD profile. Movie extras always select the HD profile regardless of source size; there is no automatic 720p scale despite the legacy `extras_720p` label. UHD extras therefore do not receive the UHD/Dolby Vision treatment.
 
@@ -106,7 +112,9 @@ python3 -m unittest discover -s tests -p 'test_encoder_backend.py' -v
 - [ ] Audio track counts, order, codecs, titles/languages, selected subtitle, and chapter names/times are checked.
 - [ ] Target-player playback and image quality are accepted.
 - [ ] HD, SD, named extras, and unmatched extras receive real-media testing.
-- [ ] Native defaults remain unchanged and TV rejects `--encoder nvenc`.
+- [ ] Native defaults remain unchanged.
+- [ ] Revised UHD settings pass the one-frame preflight on Larry and the log shows CQ 19, multipass, lookahead, AQ and B-frame settings.
+- [ ] Revised UHD output bitrate and image quality are compared with the CQ 23 encode on the same source (dark gradients, grain, high-motion scenes).
 
 Optional inspection commands (MediaInfo must be installed separately):
 

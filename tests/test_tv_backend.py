@@ -50,7 +50,7 @@ class TVBackendTests(unittest.TestCase):
 
     def test_native_and_auto_defaults(self):
         self.run_tv()
-        self.select.assert_called_once_with(3840, 2160, encoder="native")
+        self.select.assert_called_once_with(3840, 2160, encoder="native", nvenc_cq=None)
         self.assertEqual(self.encode.call_args.kwargs,
                          {"preserve_all_audio": False, "dolby_vision": "auto"})
         self.render.assert_called_once()
@@ -61,7 +61,7 @@ class TVBackendTests(unittest.TestCase):
                 if self.target.exists():
                     self.target.unlink()
                 self.run_tv(encoder="nvenc", dolby_vision=mode, preserve_all_audio=True)
-                self.assertEqual(self.select.call_args.kwargs, {"encoder": "nvenc"})
+                self.assertEqual(self.select.call_args.kwargs, {"encoder": "nvenc", "nvenc_cq": None})
                 self.assertEqual(self.encode.call_args.kwargs,
                                  {"preserve_all_audio": True, "dolby_vision": mode})
 
@@ -141,6 +141,39 @@ class TVBackendTests(unittest.TestCase):
                 cli.main()
                 self.assertEqual(process.call_args.kwargs["encoder"], encoder)
                 self.assertEqual(process.call_args.kwargs["dolby_vision"], dv)
+
+    def test_nvenc_cq_forwarding(self):
+        self.run_tv(encoder="nvenc", nvenc_cq=17)
+        self.assertEqual(self.select.call_args.kwargs, {"encoder": "nvenc", "nvenc_cq": 17})
+        with self.assertRaises(ValueError):
+            self.run_tv(nvenc_cq=17)
+        with self.assertRaises(ValueError):
+            self.run_tv(encoder="nvenc", nvenc_cq=60)
+
+    def test_main_cli_nvenc_cq(self):
+        args = ["Cinnephillia.py", str(self.root), "--encoder", "nvenc", "--nvenc-cq", "18"]
+        with patch.object(sys, "argv", args), patch.object(entry, "setup_logging"), \
+             patch.object(entry, "process_movie") as process:
+            entry.main()
+        self.assertEqual(process.call_args.kwargs["nvenc_cq"], 18)
+        for bad in (["--nvenc-cq", "18"], ["--encoder", "nvenc", "--nvenc-cq", "0"]):
+            with self.subTest(bad=bad), patch.object(sys, "argv", ["Cinnephillia.py", str(self.root)] + bad), \
+                 patch.object(entry, "process_movie") as process, \
+                 patch("sys.stderr"), self.assertRaises(SystemExit):
+                entry.main()
+            process.assert_not_called()
+
+    def test_tv_cli_nvenc_cq(self):
+        base = ["tv.cli", "process", "--input", str(self.rip), "--staging", str(self.staging),
+                "--output", str(self.output), "--series", "Series"]
+        with patch.object(sys, "argv", base + ["--encoder", "nvenc", "--nvenc-cq", "18"]), \
+             patch.object(cli, "setup_logging"), patch.object(cli, "process_tv_series") as process:
+            cli.main()
+        self.assertEqual(process.call_args.kwargs["nvenc_cq"], 18)
+        with patch.object(sys, "argv", base + ["--nvenc-cq", "18"]), patch("sys.stderr"), \
+             patch.object(cli, "process_tv_series") as process, self.assertRaises(SystemExit):
+            cli.main()
+        process.assert_not_called()
 
 
 if __name__ == "__main__":
