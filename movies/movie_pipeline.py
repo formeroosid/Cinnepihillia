@@ -19,14 +19,45 @@ EXTRA_FOLDERS = [
 ]
 
 
+_EDITION_RE = re.compile(r"\s*\{edition-([^{}]+)\}\s*$", re.IGNORECASE)
+
+
+def split_edition(base):
+    """Split a trailing Plex '{edition-Name}' tag from a folder name."""
+    match = _EDITION_RE.search(base)
+    if not match:
+        return base, None
+    return base[:match.start()], match.group(1).strip() or None
+
+
 def get_movie_info(root_path):
-    """Extract title and year from folder name like 'Movie Title (2024)'."""
+    """Extract title and year from folder name like 'Movie Title (2024)'.
+
+    A trailing Plex edition tag such as '{edition-Director's Edition}' is
+    ignored here; see get_movie_edition.
+    """
     base = os.path.basename(root_path.rstrip(os.sep))
+    base, _edition = split_edition(base)
+    base = base.strip()
     if " (" in base and base.endswith(")"):
         title, year = base.rsplit(" (", 1)
         year = year.rstrip(")")
-        return title, year
+        return title.strip(), year
     return base, ""
+
+
+def get_movie_edition(root_path):
+    """Return the Plex edition name from the movie folder, or None."""
+    base = os.path.basename(root_path.rstrip(os.sep))
+    return split_edition(base)[1]
+
+
+def feature_basename(title, year, edition=None):
+    """Plex feature file name without extension."""
+    name = f"{title} ({year})" if year else title
+    if edition:
+        name += f" {{edition-{edition}}}"
+    return name
 
 
 def identify_main_feature(files):
@@ -36,9 +67,9 @@ def identify_main_feature(files):
 
 def process_main_feature(src, out_dir, title, year, preset,
                          preserve_all_audio=False,
-                         dolby_vision="auto", dry_run=False):
+                         dolby_vision="auto", dry_run=False, edition=None):
     ensure_dir_permissions(out_dir)
-    output_file = os.path.join(out_dir, f"{title} ({year}).mkv")
+    output_file = os.path.join(out_dir, f"{feature_basename(title, year, edition)}.mkv")
     log.info(f"Encoding main feature: {src} → {output_file} using profile {preset['name']}")
     encode_with_profile(src, output_file, preset,
                         preserve_all_audio=preserve_all_audio,
@@ -73,6 +104,9 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
         raise ValueError(f"Unsupported encoder backend: {encoder!r}")
     log.info("Movie encoder backend: %s", encoder)
     title, year = get_movie_info(movie_root)
+    edition = get_movie_edition(movie_root)
+    if edition:
+        log.info("Plex edition: %s", edition)
     rip_path = os.path.join(movie_root, "rip")
     plex_root = os.path.join(movie_root, "Plex Movie Files")
 
@@ -101,7 +135,7 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
         process_main_feature(main_feature, plex_root, title, year, preset,
                              preserve_all_audio=preserve_all_audio,
                              dolby_vision=dolby_vision,
-                             dry_run=dry_run)
+                             dry_run=dry_run, edition=edition)
 
     if mode in ("extras", "both"):
         for extra in extras:

@@ -129,6 +129,8 @@ Movie Title (YYYY)/
 
 Recognized category names are `Behind The Scenes`, `Deleted Scenes`, `Featurettes`, `Interviews`, `Other`, `Shorts`, and `Trailers`. Matching is case-insensitive; spaces within category names may be spaces, underscores, or hyphens. A space, underscore, or hyphen separates the title from the category. The matched category suffix is removed from the output filename. Unmatched extras retain their basename and go under `Other/`.
 
+A trailing Plex edition tag on the movie folder is carried to the feature file: `Movie Title (YYYY) {edition-Director's Edition}/` produces `Plex Movie Files/Movie Title (YYYY) {edition-Director's Edition}.mkv`. Extra spaces around the year or tag are ignored. Extras are not renamed.
+
 Use full category names, as in the example. The current matcher does not implement the older documented shorthand suffixes such as `--featurette`, `--deleted`, or `--trailer`; there is no `Scenes` category in the current movie list.
 
 ## TV layout and review
