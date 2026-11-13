@@ -10,7 +10,7 @@ This guide describes the opt-in backend on `feat/nvenc-backend` (PR #10). Native
 - Does not enable GPU decoding.
 - TV NVENC is rejected, not silently ignored.
 - There is no automatic fallback to software encoding when NVENC fails.
-- Audio, selected subtitle, and chapters use the shared runner; NVENC changes video encoding only.
+- Audio, selected subtitles (primary plus any forced subset), and chapters use the shared runner; NVENC changes video encoding only.
 
 ## Prerequisites and checks
 
@@ -65,7 +65,7 @@ Check the log for:
 
 1. Correct source and isolated output paths.
 2. Expected profile name and `hevc_nvenc` settings.
-3. All desired audio mappings, selected subtitle, and chapter mapping.
+3. All desired audio mappings, selected primary and forced subtitles, and chapter mapping.
 4. The intended Dolby Vision plan.
 
 Dry runs still perform source probes and may create directories. They do not validate hardware, output metadata, or playback. Check free space on the output filesystem, then remove only `--dry-run` when ready.
@@ -109,7 +109,7 @@ python3 -m unittest discover -s tests -p 'test_encoder_backend.py' -v
 - [ ] Logs show matching RPU/video counts, Profile 8 verification, and copied HDR-property verification.
 - [ ] Final DV configuration confirms Profile 8.1 / compatibility ID 1.
 - [ ] Source, encoded intermediate (when retained), and final output have the expected HDR/color properties; distinguish container fields from HEVC SEI.
-- [ ] Audio track counts, order, codecs, titles/languages, selected subtitle, and chapter names/times are checked.
+- [ ] Audio track counts, order, codecs, titles/languages, selected subtitles (forced track flagged Forced=Yes), and chapter names/times are checked.
 - [ ] Target-player playback and image quality are accepted.
 - [ ] HD, SD, named extras, and unmatched extras receive real-media testing.
 - [ ] Native defaults remain unchanged.

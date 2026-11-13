@@ -8,7 +8,8 @@ A pragmatic, ffmpeg-native media transcoding pipeline for cinephiles who rip the
 - Optional NVIDIA `hevc_nvenc` backend for movie features and extras.
 - Resolution-based profile selection for movie features.
 - First audio track copied losslessly by default; `--preserve-all-audio` copies every audio track.
-- First subtitle identified as English or untagged by the shared probe is selected and copied; the selector is not restricted to PGS. Inspect dry-run stream mappings.
+- First full English or untagged subtitle is copied as the primary track (not default, not forced); the selector is not restricted to PGS.
+- An English forced-caption track (for example, on-screen translation of alien dialogue) is copied as a second subtitle flagged default+forced and titled "English (Forced)". It is found by an existing forced disposition or, because MakeMKV writes its forced subsets as Forced=No/Default=Yes, by a `NUMBER_OF_FRAMES` tag at most 10% of the primary's. Rips without that tag get only the primary. The run log names both selected streams; inspect dry-run stream mappings.
 - Chapter mapping, including chapter metadata, through the shared runner.
 - Optional UHD Dolby Vision RPU conversion/injection targeting Profile 8.1, with Matroska HDR/color-property preservation and verification.
 - Movie extras placement by category-name suffix; sequential TV episode naming without metadata matching.

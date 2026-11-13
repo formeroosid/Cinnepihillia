@@ -5,6 +5,7 @@ import os
 import subprocess
 import logging
 import re
+import json
 import shlex
 import shutil
 import tempfile
@@ -18,11 +19,33 @@ from core.dolby_vision import (
 log = logging.getLogger(__name__)
 
 
+def _tag(tags, name):
+    """Case-insensitive tag lookup that also accepts mkvmerge '-eng' suffixes."""
+    name = name.upper()
+    for key, value in (tags or {}).items():
+        k = key.upper()
+        if k == name or k.startswith(name + "-"):
+            return value
+    return ""
+
+
+def _parse_int(value):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _run_ffprobe_streams(src, stream_type):
     """
     Generic helper to get stream info from ffprobe.
     stream_type: 'a' (audio) or 's' (subtitle).
-    Returns list of dicts with keys: index, codec_name, profile, language.
+    Returns list of dicts with keys: index, codec_name, profile, language,
+    title, forced (bool), frames (int|None, from the MakeMKV/mkvmerge
+    NUMBER_OF_FRAMES statistics tag).
+
+    JSON output is used so titles containing commas and optional tags
+    cannot shift fields the way CSV output could.
     """
     cmd = [
         "ffprobe",
@@ -31,9 +54,9 @@ def _run_ffprobe_streams(src, stream_type):
         "-select_streams",
         stream_type,
         "-show_entries",
-        "stream=index,codec_name,profile:stream_tags=language",
+        "stream=index,codec_name,profile:stream_disposition=forced:stream_tags",
         "-of",
-        "csv=p=0",
+        "json",
         src,
     ]
     log.debug(f"ffprobe CMD: {' '.join(shlex.quote(c) for c in cmd)}")
@@ -41,25 +64,26 @@ def _run_ffprobe_streams(src, stream_type):
     if result.returncode != 0:
         log.warning(f"ffprobe failed for {src}: {result.stderr.strip()}")
         return []
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as e:
+        log.warning(f"ffprobe returned unparseable JSON for {src}: {e}")
+        return []
+    return [_stream_from_probe(st) for st in data.get("streams", [])]
 
-    streams = []
-    for line in result.stdout.splitlines():
-        parts = line.split(",")
-        if not parts:
-            continue
-        idx = parts[0]
-        codec = parts[1] if len(parts) > 1 else ""
-        profile = parts[2] if len(parts) > 2 else ""
-        lang = parts[3] if len(parts) > 3 else ""
-        streams.append(
-            {
-                "index": idx,
-                "codec_name": codec,
-                "profile": profile,
-                "language": lang,
-            }
-        )
-    return streams
+
+def _stream_from_probe(st):
+    tags = st.get("tags") or {}
+    disposition = st.get("disposition") or {}
+    return {
+        "index": str(st.get("index", "")),
+        "codec_name": st.get("codec_name", "") or "",
+        "profile": st.get("profile", "") or "",
+        "language": _tag(tags, "language"),
+        "title": _tag(tags, "title"),
+        "forced": bool(_parse_int(disposition.get("forced")) or 0),
+        "frames": _parse_int(_tag(tags, "NUMBER_OF_FRAMES")),
+    }
 
 def _select_primary_audio(audio_streams):
     """
@@ -75,14 +99,68 @@ def _select_primary_audio(audio_streams):
     """
     return 0 if audio_streams else None
 
+# A forced-only subset (MakeMKV splits on-disc forced captions, e.g. Klingon
+# dialogue, into their own track) carries a small fraction of the full
+# track's caption events: 42 of 2456 on Star Trek: The Motion Picture.
+# Full alternates (SDH, commentary) are comparable in size to the primary.
+FORCED_SUBSET_MAX_RATIO = 0.10
+
+
+def _is_english_or_untagged(s):
+    lang = (s.get("language") or "").lower()
+    return lang in ("eng", "en", "", "und")
+
+
 def _select_first_english_sub(sub_streams):
     """
     Return index of first English (or untagged) subtitle stream, or None.
+    Kept for callers that only need the primary track; see
+    ``_select_english_subs`` for primary + forced selection.
     """
-    for s in sub_streams:
-        if s["language"] in ("eng", "") or not s["language"]:
-            return s["index"]
-    return None
+    primary, _ = _select_english_subs(sub_streams)
+    return primary["index"] if primary else None
+
+
+def _select_english_subs(sub_streams):
+    """
+    Return (primary, forced) subtitle stream dicts; either may be None.
+
+    primary: first English/untagged track that is not a forced subset.
+    forced:  English/untagged forced-caption track, chosen in order:
+        1. a track whose container disposition is already forced;
+        2. a track whose NUMBER_OF_FRAMES is at most
+           FORCED_SUBSET_MAX_RATIO of the primary's. MakeMKV writes its
+           forced subsets as Forced=No, Default=Yes, so the flag alone
+           does not find them.
+    If the only English track is a forced subset it is still returned as
+    the primary, so behavior never regresses to "no subtitle".
+    """
+    english = [s for s in sub_streams if _is_english_or_untagged(s)]
+    if not english:
+        return None, None
+
+    flagged = [s for s in english if s.get("forced")]
+    unflagged = [s for s in english if not s.get("forced")]
+    primary = unflagged[0] if unflagged else english[0]
+
+    forced = next((s for s in flagged if s is not primary), None)
+    if forced is None:
+        primary_frames = primary.get("frames")
+        if primary_frames:
+            # Prefer the subset that is a true subset of the primary, i.e.
+            # small; if the primary itself turned out to be a subset of a
+            # later full track, swap them.
+            for s in english:
+                if s is primary or not s.get("frames"):
+                    continue
+                if s["frames"] <= primary_frames * FORCED_SUBSET_MAX_RATIO:
+                    forced = s
+                    break
+                if primary_frames <= s["frames"] * FORCED_SUBSET_MAX_RATIO:
+                    primary, forced = s, primary
+                    break
+    return primary, forced
+
 
 def _normalize_language_tag(lang, fallback="eng"):
     if not lang:
@@ -233,7 +311,17 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
         log.error(f"No audio streams found in {src}")
         return subprocess.CompletedProcess(args=[], returncode=1)
 
-    sub_idx = _select_first_english_sub(sub_streams)
+    primary_sub, forced_sub = _select_english_subs(sub_streams)
+    if forced_sub is not None:
+        log.info(
+            "Subtitles: primary stream %s (%s events), forced stream %s "
+            "(%s events, source forced flag=%s)",
+            primary_sub["index"], primary_sub.get("frames"),
+            forced_sub["index"], forced_sub.get("frames"), forced_sub.get("forced"),
+        )
+    elif primary_sub is not None:
+        log.info("Subtitles: primary stream %s; no forced subset found",
+                 primary_sub["index"])
 
     input_args = profile.get("input_args", [])
 
@@ -321,16 +409,25 @@ def encode_with_profile(src, output_file, profile, preserve_all_audio=False,
 
     sub_args = []
     sub_metadata_args = []
-    if sub_idx is not None:
-        map_args += ["-map", f"0:{sub_idx}"]
-        sub_args = ["-c:s", "copy", "-disposition:s:0", "0"]
-
-        selected_sub = next((s for s in sub_streams if s["index"] == sub_idx), None)
-        sub_lang = _normalize_language_tag(
-            selected_sub.get("language") if selected_sub else None,
-            fallback="eng",
-        )
-        sub_metadata_args = ["-metadata:s:s:0", f"language={sub_lang}"]
+    if primary_sub is not None:
+        sub_args = ["-c:s", "copy"]
+        out_pos = 0
+        # Primary first: full English, not default, not forced (unchanged).
+        # Forced second: default+forced so players show it without the
+        # viewer enabling subtitles, matching disc behavior.
+        for sub, disposition, title in (
+            (primary_sub, "0", None),
+            (forced_sub, "default+forced", "English (Forced)"),
+        ):
+            if sub is None:
+                continue
+            map_args += ["-map", f"0:{sub['index']}"]
+            sub_lang = _normalize_language_tag(sub.get("language"), fallback="eng")
+            sub_args += [f"-disposition:s:{out_pos}", disposition]
+            sub_metadata_args += [f"-metadata:s:s:{out_pos}", f"language={sub_lang}"]
+            if title:
+                sub_metadata_args += [f"-metadata:s:s:{out_pos}", f"title={title}"]
+            out_pos += 1
 
     cmd = [
         "ffmpeg",
