@@ -71,6 +71,10 @@ python3 Cinnephillia.py "/path/to/Movie Title (YYYY)" \
     --type movie --mode feature --encoder nvenc \
     --preserve-all-audio --dolby-vision p81 --dry-run
 
+# Plex edition folder; the feature is named "Movie Title (YYYY) {edition-Director's Cut}.mkv"
+python3 Cinnephillia.py "/path/to/Movie Title (YYYY) {edition-Director's Cut}" \
+    --type movie --mode feature
+
 # TV retains the native backend
 python3 Cinnephillia.py "/path/to/Series Title" \
     --type tv --series-name "Series Title"
@@ -130,9 +134,35 @@ Movie Title (YYYY)/
 
 Recognized category names are `Behind The Scenes`, `Deleted Scenes`, `Featurettes`, `Interviews`, `Other`, `Shorts`, and `Trailers`. Matching is case-insensitive; spaces within category names may be spaces, underscores, or hyphens. A space, underscore, or hyphen separates the title from the category. The matched category suffix is removed from the output filename. Unmatched extras retain their basename and go under `Other/`.
 
-A trailing Plex edition tag on the movie folder is carried to the feature file: `Movie Title (YYYY) {edition-Director's Edition}/` produces `Plex Movie Files/Movie Title (YYYY) {edition-Director's Edition}.mkv`. Extra spaces around the year or tag are ignored. Extras are not renamed.
-
 Use full category names, as in the example. The current matcher does not implement the older documented shorthand suffixes such as `--featurette`, `--deleted`, or `--trailer`; there is no `Scenes` category in the current movie list.
+
+### Plex editions
+
+To process a specific edition of a movie, append a Plex edition tag to the movie folder name. Cinnephillia removes the tag before reading the title and year, then adds it back to the main feature's filename:
+
+```text
+Star Trek - The Motion Picture (1979) {edition-Director's Edition}/
+├── rip/
+│   └── STAR TREK- THE MOTION PICTURE - DIRECTOR'S EDITION-FPL_MainFeature_t00.mkv
+└── Plex Movie Files/
+    └── Star Trek - The Motion Picture (1979) {edition-Director's Edition}.mkv
+```
+
+The run logs the detected edition, for example `Plex edition: Director's Edition`.
+
+- The tag must be the last thing in the folder name and take the form `{edition-Name}`. The `edition-` prefix is case-insensitive. The name may contain spaces and apostrophes but not braces.
+- Whitespace around the year and the tag is ignored. `Title  (YYYY)  {edition-Name}` produces `Title (YYYY) {edition-Name}.mkv`.
+- Other brace tags, such as `{tmdb-12345}`, are not recognized. A folder ending in one will not have its year detected.
+- If the folder has no year, the feature is named `Title {edition-Name}.mkv`, with no empty `()`.
+- Only the main feature gets the tag. Extras keep their category folders and names.
+- `utils/copy_plex_movies.sh` uses the movie folder name as the destination folder, so the edition tag also appears on the exported Plex folder. Plex supports this per-edition folder layout, and it is the layout Plex requires for local extras and trailers. Plex reads the edition from the filename. Assigning editions requires Plex Pass on the server admin account ([Plex Support: Multiple Editions](https://support.plex.tv/articles/multiple-editions/)).
+
+Quote the path on the command line, because it contains braces and an apostrophe:
+
+```bash
+python3 Cinnephillia.py "/path/to/Star Trek - The Motion Picture (1979) {edition-Director's Edition}" \
+    --type movie --mode feature --encoder nvenc --dolby-vision auto
+```
 
 ## TV layout and review
 
