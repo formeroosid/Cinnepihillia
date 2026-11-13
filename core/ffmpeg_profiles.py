@@ -7,16 +7,39 @@ log = logging.getLogger(__name__)
 EXTRAS_PRESET_NAME = "extras_720p"  # used just as a label
 
 
-def apply_encoder_backend(profile, encoder="native"):
-    """Select native profiles or NVIDIA HEVC without changing profile names."""
+NVENC_DEFAULT_CQ = {"4k": 19, "bluray": 20, "sd": 20}
+NVENC_CQ_RANGE = (1, 51)
+
+
+def validate_nvenc_cq(value):
+    """Return an NVENC CQ override as int, or None when not supplied."""
+    if value is None:
+        return None
+    cq = int(value)
+    low, high = NVENC_CQ_RANGE
+    if not low <= cq <= high:
+        raise ValueError(f"NVENC CQ must be between {low} and {high}: {value!r}")
+    return cq
+
+
+def apply_encoder_backend(profile, encoder="native", nvenc_cq=None):
+    """Select native profiles or NVIDIA HEVC without changing profile names.
+
+    nvenc_cq overrides the per-profile NVENC constant-quality value. It is
+    rejected for the native backend so a quality request is never ignored.
+    """
     if encoder not in {"native", "nvenc"}:
         raise ValueError(f"Unsupported encoder backend: {encoder!r}")
+    nvenc_cq = validate_nvenc_cq(nvenc_cq)
     if encoder == "native":
+        if nvenc_cq is not None:
+            raise ValueError("nvenc_cq requires encoder='nvenc'")
         return profile
     name = profile["name"]
     if name not in {"4k", "bluray", "sd"}:
         raise ValueError(f"Unsupported NVENC profile: {name!r}")
     is_uhd = name == "4k"
+    cq = nvenc_cq if nvenc_cq is not None else NVENC_DEFAULT_CQ[name]
     video_args = [
         "-vf", "format=p010le" if is_uhd else "format=nv12",
         "-fps_mode", "passthrough",
@@ -26,11 +49,23 @@ def apply_encoder_backend(profile, encoder="native"):
         "-preset", "p6",
         "-tune", "hq",
         "-rc", "vbr",
-        "-cq", "23" if is_uhd else "20",
+        "-cq", str(cq),
         "-b:v", "0",
+        # Quality tools: full-resolution two-pass rate control, lookahead,
+        # spatial/temporal adaptive quantization (flat dark gradients and
+        # static scenes), and B-frames used as references.
+        "-multipass", "fullres",
+        "-rc-lookahead", "32",
+        "-spatial-aq", "1",
+        "-temporal-aq", "1",
+        "-aq-strength", "8",
+        "-bf", "4",
+        "-b_ref_mode", "middle",
     ]
     if is_uhd:
         video_args += [
+            # Main tier caps Level 5.x near 25-40 Mb/s; lower CQ peaks exceed it.
+            "-tier", "high",
             "-color_range", "tv",
             "-color_primaries", "bt2020",
             "-color_trc", "smpte2084",
@@ -46,12 +81,13 @@ def apply_encoder_backend(profile, encoder="native"):
     result = dict(profile)
     result["input_args"] = []
     result["video_args"] = video_args
-    log.info("Encoder backend: nvenc; profile=%s; GPU=0; preset=p6; CQ=%s",
-             name, "23" if is_uhd else "20")
+    log.info("Encoder backend: nvenc; profile=%s; GPU=0; preset=p6; CQ=%s%s; "
+             "multipass=fullres; lookahead=32; spatial/temporal AQ=on; bf=4",
+             name, cq, " (override)" if nvenc_cq is not None else "")
     return result
 
 
-def select_preset(width, height, encoder="native"):
+def select_preset(width, height, encoder="native", nvenc_cq=None):
     """Choose a resolution profile and apply the encoder backend."""
     if width is None or height is None:
         log.info("Could not detect resolution, using BluRay/HD profile.")
@@ -65,7 +101,7 @@ def select_preset(width, height, encoder="native"):
     else:
         log.info(f"Detected BluRay/HD ({width}x{height}).")
         profile = _bluray_profile()
-    return apply_encoder_backend(profile, encoder)
+    return apply_encoder_backend(profile, encoder, nvenc_cq=nvenc_cq)
 
 
 def _sd_profile():

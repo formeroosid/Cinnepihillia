@@ -52,7 +52,11 @@ class EncoderBackendTests(unittest.TestCase):
                 self.assertEqual(result["input_args"], [])
                 for flag, value in {"-c:v": "hevc_nvenc", "-gpu": "0",
                                     "-preset": "p6", "-tune": "hq", "-rc": "vbr",
-                                    "-b:v": "0", "-fps_mode": "passthrough"}.items():
+                                    "-b:v": "0", "-fps_mode": "passthrough",
+                                    "-multipass": "fullres", "-rc-lookahead": "32",
+                                    "-spatial-aq": "1", "-temporal-aq": "1",
+                                    "-aq-strength": "8", "-bf": "4",
+                                    "-b_ref_mode": "middle"}.items():
                     self.assertEqual(self.option(result, flag), value)
                 for forbidden in ("-x265-params", "-crf", "-vaapi_device", "libx265", "hevc_vaapi"):
                     self.assertNotIn(forbidden, result["video_args"])
@@ -61,7 +65,7 @@ class EncoderBackendTests(unittest.TestCase):
     def test_uhd(self):
         result = apply_encoder_backend({"name": "4k"}, "nvenc")
         for flag, value in {"-vf": "format=p010le", "-profile:v": "main10",
-                            "-cq": "23", "-color_range": "tv",
+                            "-cq": "19", "-tier": "high", "-color_range": "tv",
                             "-color_primaries": "bt2020", "-color_trc": "smpte2084",
                             "-colorspace": "bt2020nc"}.items():
             self.assertEqual(self.option(result, flag), value)
@@ -77,6 +81,32 @@ class EncoderBackendTests(unittest.TestCase):
                         self.assertEqual(self.option(result, flag), "bt709")
                     else:
                         self.assertNotIn(flag, result["video_args"])
+
+    def test_hd_sd_main_tier(self):
+        for name in ("bluray", "sd"):
+            with self.subTest(name=name):
+                result = apply_encoder_backend({"name": name}, "nvenc")
+                self.assertNotIn("-tier", result["video_args"])
+
+    def test_nvenc_cq_override(self):
+        for name in ("4k", "bluray", "sd"):
+            with self.subTest(name=name):
+                result = apply_encoder_backend({"name": name}, "nvenc", nvenc_cq=17)
+                self.assertEqual(self.option(result, "-cq"), "17")
+                self.assertEqual(result["video_args"].count("-cq"), 1)
+        uhd = select_preset(3840, 2160, encoder="nvenc", nvenc_cq=18)
+        self.assertEqual(self.option(uhd, "-cq"), "18")
+        default = select_preset(3840, 2160, encoder="nvenc")
+        self.assertEqual(self.option(default, "-cq"), "19")
+
+    def test_nvenc_cq_validation(self):
+        for bad in (0, 52, -1):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                apply_encoder_backend({"name": "4k"}, "nvenc", nvenc_cq=bad)
+        with self.assertRaises(ValueError):
+            apply_encoder_backend({"name": "4k"}, "native", nvenc_cq=19)
+        with self.assertRaises(ValueError):
+            select_preset(3840, 2160, nvenc_cq=19)
 
     def test_invalid_backend_and_profile(self):
         with self.assertRaises(ValueError):

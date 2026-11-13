@@ -4,7 +4,7 @@ This guide applies to the `feat/tv-nvenc` branch. It supersedes the movie-only N
 
 ## Entry points
 
-Both entry points accept `--encoder native|nvenc` and `--dolby-vision auto|off|p81|p76`. Defaults remain native/auto. NVENC reuses the movie profiles: GPU 0, P6/HQ, VBR, CQ 23/Main10/p010le for UHD and CQ 20/Main/nv12 for HD/SD. GPU decoding and HDR10+ preservation are not added.
+Both entry points accept `--encoder native|nvenc` and `--dolby-vision auto|off|p81|p76`. Defaults remain native/auto. NVENC reuses the movie profiles: GPU 0, P6/HQ, VBR with multipass, lookahead, spatial/temporal AQ and B-frame references; CQ 19/Main10/High tier/p010le for UHD and CQ 20/Main/nv12 for HD/SD. `--nvenc-cq N` overrides CQ. GPU decoding and HDR10+ preservation are not added.
 
 For a newly encoded UHD episode, p81 requires detected source DV plus dovi_tool and mkvmerge; p76 currently converts to P8.1. Non-UHD profiles do not engage DV, even in forced modes. The shared helper preserves/verifies discovered HDR container properties; that is not insertion of static HDR SEI into raw HEVC.
 

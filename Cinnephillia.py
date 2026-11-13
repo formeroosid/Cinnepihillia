@@ -39,18 +39,29 @@ def main():
              "nvenc uses NVIDIA HEVC on GPU 0. Existing TV staging files are skipped.",
     )
     parser.add_argument(
+        "--nvenc-cq", type=int, default=None, metavar="CQ",
+        help="Override NVENC constant quality (1-51; lower is higher quality and larger). "
+             "Defaults: 19 for UHD, 20 for HD/SD. Applies to every NVENC encode in the run, "
+             "including movie extras. Requires --encoder nvenc.",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Movies: preview processing commands. TV: input inventory only, "
              "without encoder preflight or Dolby Vision planning.",
     )
     args = parser.parse_args()
+    if args.nvenc_cq is not None:
+        if args.encoder != "nvenc":
+            parser.error("--nvenc-cq requires --encoder nvenc")
+        if not 1 <= args.nvenc_cq <= 51:
+            parser.error("--nvenc-cq must be between 1 and 51")
     setup_logging()
     root = Path(args.path)
     if args.type == "movie":
         process_movie(str(root), args.mode,
                       preserve_all_audio=args.preserve_all_audio,
                       dolby_vision=args.dolby_vision, dry_run=args.dry_run,
-                      encoder=args.encoder)
+                      encoder=args.encoder, nvenc_cq=args.nvenc_cq)
         return
     process_tv_series(
         input_root=str(root / "rip"),
@@ -61,6 +72,7 @@ def main():
         encode_profile=None, dry_run=args.dry_run, expected_counts=None,
         use_metadata_rename=False, preserve_all_audio=args.preserve_all_audio,
         encoder=args.encoder, dolby_vision=args.dolby_vision,
+        nvenc_cq=args.nvenc_cq,
     )
 
 

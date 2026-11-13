@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from core.media_analyzer import detect_resolution
-from core.ffmpeg_profiles import select_preset
+from core.ffmpeg_profiles import select_preset, validate_nvenc_cq
 from core.ffmpeg_runner import encode_with_profile
 from shared.file_ops import ensure_dir_permissions
 from tv.disc_parser import parse_tv_input
@@ -73,9 +73,13 @@ def process_tv_series(
     use_metadata_rename=False,
     encoder="native",
     dolby_vision="auto",
+    nvenc_cq=None,
 ):
     if encoder not in {"native", "nvenc"}:
         raise ValueError(f"Unsupported encoder backend: {encoder!r}")
+    nvenc_cq = validate_nvenc_cq(nvenc_cq)
+    if nvenc_cq is not None and encoder != "nvenc":
+        raise ValueError("--nvenc-cq requires --encoder nvenc")
     if dolby_vision not in {"auto", "off", "p81", "p76"}:
         raise ValueError(f"Unsupported Dolby Vision mode: {dolby_vision!r}")
     log.info("TV encoder backend: %s; Dolby Vision mode: %s", encoder, dolby_vision)
@@ -102,7 +106,7 @@ def process_tv_series(
     for ep in sorted(episodes, key=lambda e: (e["season"], e["disc"], e["title_num"], str(e["path"]))):
         src = Path(ep["path"])
         width, height = detect_resolution(str(src))
-        profile = select_preset(width, height, encoder=encoder)
+        profile = select_preset(width, height, encoder=encoder, nvenc_cq=nvenc_cq)
         rel_path = src.relative_to(input_root)
         output_file = staging_dir / rel_path.with_suffix(".mkv")
         ensure_dir_permissions(str(output_file.parent))

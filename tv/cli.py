@@ -26,6 +26,9 @@ def main():
                       help="Losslessly copy every audio track instead of only the primary.")
     proc.add_argument("--encoder", choices=["native", "nvenc"], default="native",
                       help="Video backend for new encodes; existing staging files are skipped.")
+    proc.add_argument("--nvenc-cq", type=int, default=None, metavar="CQ",
+                      help="Override NVENC CQ (1-51; defaults 19 UHD, 20 HD/SD). "
+                           "Requires --encoder nvenc.")
     proc.add_argument("--dolby-vision", choices=["auto", "off", "p81", "p76"], default="auto",
                       help="UHD DV mode: auto, off, or required p81/p76 (p76 converts to P8.1). "
                            "Required modes need source DV, dovi_tool and mkvmerge. "
@@ -39,6 +42,11 @@ def main():
     inv.add_argument("--duration-min", type=int, default=2400)
     inv.add_argument("--duration-max", type=int, default=5400)
     args = parser.parse_args()
+    if getattr(args, "nvenc_cq", None) is not None:
+        if args.encoder != "nvenc":
+            parser.error("--nvenc-cq requires --encoder nvenc")
+        if not 1 <= args.nvenc_cq <= 51:
+            parser.error("--nvenc-cq must be between 1 and 51")
     setup_logging()
     if args.command == "process":
         process_tv_series(
@@ -48,6 +56,7 @@ def main():
             encode_profile=args.encode, dry_run=args.dry_run,
             preserve_all_audio=args.preserve_all_audio,
             encoder=args.encoder, dolby_vision=args.dolby_vision,
+            nvenc_cq=args.nvenc_cq,
         )
     elif args.command == "inventory":
         if args.plex_dir:

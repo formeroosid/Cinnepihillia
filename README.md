@@ -26,9 +26,9 @@ See [NVIDIA/NVENC guide](docs/NVENC.md) for requirements, settings, limitations,
 | native | `4k` | `libx265` | yuv420p10le | CRF 23, slow | BT.2020/PQ, x265 HDR10 options |
 | nvenc | `sd` | `hevc_nvenc` Main | nv12 | VBR, CQ 20, bitrate 0 | No explicit color override |
 | nvenc | `bluray` | `hevc_nvenc` Main | nv12 | VBR, CQ 20, bitrate 0 | BT.709 |
-| nvenc | `4k` | `hevc_nvenc` Main10 | p010le | VBR, CQ 23, bitrate 0 | Limited-range BT.2020/PQ |
+| nvenc | `4k` | `hevc_nvenc` Main10, High tier | p010le | VBR, CQ 19, bitrate 0 | Limited-range BT.2020/PQ |
 
-All NVENC profiles select GPU 0, preset P6, HQ tuning, and passthrough frame timing. CQ values are starting settings, not equivalents of x265 CRF values.
+All NVENC profiles select GPU 0, preset P6, HQ tuning, passthrough frame timing, full-resolution multipass, 32-frame lookahead, spatial and temporal AQ (strength 8), and four B-frames with middle B-frame references. `--nvenc-cq N` (1-51) overrides the CQ for every NVENC encode in the run. CQ values are starting settings, not equivalents of x265 CRF values.
 
 Movie features select `4k` when width is at least 3840 or height at least 2160; otherwise `sd` when width is at most 720 or height at most 576; otherwise `bluray`. Unknown dimensions fall back to `bluray`. This is resolution-based selection, not HDR detection or tone mapping: inspect the profile before processing SDR UHD or other atypical sources.
 
@@ -80,7 +80,8 @@ python3 Cinnephillia.py "/path/to/Series Title" \
 |---|---|
 | `--type movie|tv` | Default: movie |
 | `--mode feature|extras|both` | Movie processing selection; default: both |
-| `--encoder native|nvenc` | Default: native; NVENC is movie-only |
+| `--encoder native|nvenc` | Default: native |
+| `--nvenc-cq N` | NVENC only; override CQ 1-51 (defaults: 19 UHD, 20 HD/SD); lower is higher quality and larger |
 | `--preserve-all-audio` | Copy all audio tracks rather than only the first |
 | `--dolby-vision auto|off|p81|p76` | Default: auto; only applies to `4k` profiles |
 | `--dry-run` | Preview processing commands; skips encoding, preflight, RPU extraction/injection, and HDR remux verification |
