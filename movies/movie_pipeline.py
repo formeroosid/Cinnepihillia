@@ -23,7 +23,7 @@ _EDITION_RE = re.compile(r"\s*\{edition-([^{}]+)\}\s*$", re.IGNORECASE)
 
 
 def split_edition(base):
-    """Split a trailing Plex '{edition-Name}' tag from a folder name."""
+    """Split a trailing Plex '{edition-Name}' tag from a folder or file stem."""
     match = _EDITION_RE.search(base)
     if not match:
         return base, None
@@ -130,16 +130,49 @@ def process_movie(movie_root, mode="both", preserve_all_audio=False,
     if preserve_all_audio:
         log.info("preserve-all-audio: enabled for movie '%s (%s)' — every audio "
                  "track will be copied", title, year or "????")
-    main_feature = identify_main_feature(full_paths)
-    extras = [f for f in full_paths if f != main_feature]
 
-    if mode in ("feature", "both") and main_feature:
-        width, height = detect_resolution(main_feature)
-        preset = select_preset(width, height, encoder=encoder, nvenc_cq=nvenc_cq)
-        process_main_feature(main_feature, plex_root, title, year, preset,
-                             preserve_all_audio=preserve_all_audio,
-                             dolby_vision=dolby_vision,
-                             dry_run=dry_run, edition=edition)
+    # Explicit filename editions are features, not extras.
+    features = []
+    for src in sorted(full_paths):
+        source_base = os.path.splitext(os.path.basename(src))[0]
+        source_edition = split_edition(source_base)[1]
+        if source_edition:
+            features.append((src, source_edition))
+
+    # Retain the largest-file fallback and folder edition for untagged inputs.
+    if not features:
+        main_feature = identify_main_feature(full_paths)
+        if main_feature:
+            features.append((main_feature, edition))
+
+    # Reject destination collisions before starting any encoding.
+    output_names = {}
+    for src, feature_edition in features:
+        output_name = feature_basename(title, year, feature_edition)
+        output_key = output_name.casefold()
+        if output_key in output_names:
+            raise ValueError(
+                f"Multiple feature sources map to {output_name!r}: "
+                f"{output_names[output_key]!r} and {src!r}"
+            )
+        output_names[output_key] = src
+
+    feature_paths = {src for src, _ in features}
+    extras = [src for src in full_paths if src not in feature_paths]
+
+    for src, feature_edition in features:
+        log.info("Selected feature: %s (edition=%s)",
+                 src, feature_edition or "unspecified")
+
+    if mode in ("feature", "both"):
+        for src, feature_edition in features:
+            width, height = detect_resolution(src)
+            preset = select_preset(width, height, encoder=encoder,
+                                   nvenc_cq=nvenc_cq)
+            process_main_feature(src, plex_root, title, year, preset,
+                                 preserve_all_audio=preserve_all_audio,
+                                 dolby_vision=dolby_vision,
+                                 dry_run=dry_run, edition=feature_edition)
 
     if mode in ("extras", "both"):
         for extra in extras:
